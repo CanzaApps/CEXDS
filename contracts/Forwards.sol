@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -19,10 +20,14 @@ contract Forward{
     //Boolean to activate contract
     bool public contractActive;
 
-    uint public timestamp;
+    //Timestamp for the Expiry
+    uint public expiry;
 
     //For buyer to deploy forward contract
+    //consider swapping this into a constructor so that this deploys the contracts with the relevant parameters required
     function deployBuyer(address _strikeAsset,uint256 _strikePrice, address _underlyingAsset, uint256 _underlyingQuantity, address _sellerAddress, uint256 _days) public payable {
+        
+        //Checks that the buyer has enough balance to deploy
         require(_strikePrice <= IERC20(_strikeAsset).balanceOf(msg.sender),"Not Enough Balance");
         
         
@@ -37,34 +42,49 @@ contract Forward{
         //Sets seller 
         seller = _sellerAddress;
 
-        //Sets timelock
-        timestamp = block.timestamp + _days;
+        //Sets expiry
+        expiry = block.timestamp + _days*60*24;
 
-        IERC20(strikeAsset).transfer(address(msg.sender), strikePrice);
+        //Transfer tokens to the contract from the sender
+        IERC20(strikeAsset).transferFrom(msg.sender, address(this), strikePrice);
 
     }
 
     //Allows seller to deposit tokens
     function depositSeller() public payable{
+
+        //Require only the seller identified by the buyer can deposit 
         require(msg.sender == seller, "You are not the seller");
+
+        //Require that the seller have the sufficient balance as identified in the contract
         require(underlyingQuantity <= IERC20(underlyingAsset).balanceOf(msg.sender),"Not Enough Balance");
-        require(!contractActive, "Contract is Active");
-        IERC20(underlyingAsset).transfer(address(this), underlyingQuantity);
+
+        //Require that contract is active
+        require(!contractActive, "Contract is active");
+
+        //Transfer tokens to the contract
+        IERC20(underlyingAsset).transferFrom(msg.sender, address(this), underlyingQuantity);
         contractActive = true;
     }
 
     //Allows function to execute
     function executeBuyerForward() public{
         
-        //Checks that contract is active
-        require(contractActive, "Contract is Not Active");
-        require(block.timestamp >= timestamp, "Contract Has not Matured");
+        //Checks that contract is active (i.e. the seller has deposited his amount)
+        require(contractActive, "Contract is not active");
+
+        //Require that the contract expiry is passed before contract and be executed
+        require(block.timestamp >= expiry, "Contract has not matured");
+
+        //Send underlying assets to buyer
         IERC20(underlyingAsset).transferFrom(address(this), buyer , underlyingQuantity);
+        
+        //Send strike assets to seller
         IERC20(strikeAsset).transferFrom(address(this), seller, strikePrice);
 
+        //Self destruct contract once it has been executed
         selfdestruct(payable(buyer));
     }
-
 
 
     //Test Functions
@@ -77,14 +97,17 @@ contract Forward{
 
     function trasnfer(uint256 _amount, address payable _asset) public{
 
-        IERC20(_asset).transfer(address(this), _amount);
+        IERC20(_asset).allowance(msg.sender, address(this));
+        //IERC20(_asset).approve(address(this), _amount);
+
+        IERC20(_asset).transferFrom(msg.sender, address(this), _amount);
 
     }
 
 
     function setTime() public{
 
-        timestamp = block.timestamp;
+        expiry = block.timestamp;
     }
 
 
