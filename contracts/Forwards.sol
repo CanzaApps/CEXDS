@@ -9,6 +9,9 @@ contract Forward{
     address public buyer;
     address public seller;
     
+    //Set up Counterparty function to allow the deployer to be flexible
+    address public counterParty;
+    
     //Strike (purchasing) asset and Quantity
     address public strikeAsset;
     uint256 public strikePrice;
@@ -23,13 +26,10 @@ contract Forward{
     //Timestamp for the Expiry
     uint public expiry;
 
-    //For buyer to deploy forward contract
+    //For buyer or seller to deploy forward contract
     //consider swapping this into a constructor so that this deploys the contracts with the relevant parameters required
-    function deployBuyer(address _strikeAsset,uint256 _strikePrice, address _underlyingAsset, uint256 _underlyingQuantity, address _sellerAddress, uint256 _days) public payable {
+    function deploy(address _strikeAsset,uint256 _strikePrice, address _underlyingAsset, uint256 _underlyingQuantity, address _buyerAddress, address _sellerAddress, uint256 _days) public payable {
         
-        //Checks that the buyer has enough balance to deploy
-        require(_strikePrice <= IERC20(_strikeAsset).balanceOf(msg.sender),"Not Enough Balance");
-
         //Require that contract is not active
         require(!contractActive, "Contract is active");        
         
@@ -42,36 +42,71 @@ contract Forward{
         underlyingQuantity = _underlyingQuantity;
 
         //Sets buyer & seller 
-        buyer = msg.sender;
+        buyer = _buyerAddress;
         seller = _sellerAddress;
 
         //Sets expiry
         expiry = block.timestamp + _days*60*24;
 
-        //Transfer tokens to the contract from the sender
-        IERC20(strikeAsset).transferFrom(msg.sender, address(this), strikePrice);
+
+        //Checks whether the counterparty is the buyer and seller and adjusts requirement accordingly
+        address _asset;
+        uint _quantity;
+
+        if (msg.sender == buyer){
+            _asset = strikeAsset;
+            _quantity = strikePrice;
+            counterParty = seller;
+
+        } if(msg.sender == seller){
+            _asset = underlyingAsset;
+            _quantity = underlyingQuantity;
+            counterParty = buyer;
+        }
+
+        //Checks that the buyer has enough balance to deploy
+        require(_quantity <= IERC20(_asset).balanceOf(msg.sender),"Not Enough Balance");
+        
+        //Transfers tokens to the sender
+        IERC20(_asset).transferFrom(msg.sender, address(this), _quantity);
 
     }
 
     //Allows seller to deposit tokens
-    function depositSeller() public payable{
+    function depositCounterparty() public payable{
 
         //Require only the seller identified by the buyer can deposit 
-        require(msg.sender == seller, "You are not the seller");
+        require(msg.sender == counterParty, "You are not the counterParty");
 
-        //Require that the seller have the sufficient balance as identified in the contract
-        require(underlyingQuantity <= IERC20(underlyingAsset).balanceOf(msg.sender),"Not Enough Balance");
 
         //Require that contract is not active
         require(!contractActive, "Contract is active");
 
+        //Checks whether the counterparty is the buyer and seller and adjusts requirement accordingly
+        address _asset;
+        uint _quantity;
+
+        if (counterParty == buyer){
+            _asset = strikeAsset;
+            _quantity = strikePrice;
+            counterParty = seller;
+
+        } if(counterParty == seller){
+            _asset = underlyingAsset;
+            _quantity = underlyingQuantity;
+            counterParty = buyer;
+        }
+        //Require that the seller have the sufficient balance as identified in the contract
+        require(underlyingQuantity <= IERC20(underlyingAsset).balanceOf(msg.sender),"Not Enough Balance");
+
         //Transfer tokens to the contract
-        IERC20(underlyingAsset).transferFrom(msg.sender, address(this), underlyingQuantity);
+        IERC20(_asset).transferFrom(msg.sender, address(this), _quantity);
+
         contractActive = true;
     }
 
     //Allows function to execute
-    function executeBuyerForward() public{
+    function executeForward() public{
         
         //Checks that contract is active (i.e. the seller has deposited his amount)
         require(contractActive, "Contract is not active");
