@@ -29,7 +29,9 @@ contract Forward{
         
         //Checks that the buyer has enough balance to deploy
         require(_strikePrice <= IERC20(_strikeAsset).balanceOf(msg.sender),"Not Enough Balance");
-        
+
+        //Require that contract is not active
+        require(!contractActive, "Contract is active");        
         
         //Sets strike parameters
         strikeAsset = _strikeAsset;
@@ -39,7 +41,8 @@ contract Forward{
         underlyingAsset = _underlyingAsset;
         underlyingQuantity = _underlyingQuantity;
 
-        //Sets seller 
+        //Sets buyer & seller 
+        buyer = msg.sender;
         seller = _sellerAddress;
 
         //Sets expiry
@@ -59,7 +62,7 @@ contract Forward{
         //Require that the seller have the sufficient balance as identified in the contract
         require(underlyingQuantity <= IERC20(underlyingAsset).balanceOf(msg.sender),"Not Enough Balance");
 
-        //Require that contract is active
+        //Require that contract is not active
         require(!contractActive, "Contract is active");
 
         //Transfer tokens to the contract
@@ -77,10 +80,12 @@ contract Forward{
         require(block.timestamp >= expiry, "Contract has not matured");
 
         //Send underlying assets to buyer
-        IERC20(underlyingAsset).transferFrom(address(this), buyer , underlyingQuantity);
+        //IERC20(underlyingAsset).transferFrom(address(this), buyer , underlyingQuantity);
+        IERC20(underlyingAsset).transfer(buyer , underlyingQuantity);
         
         //Send strike assets to seller
-        IERC20(strikeAsset).transferFrom(address(this), seller, strikePrice);
+        //IERC20(strikeAsset).transferFrom(address(this), seller, strikePrice);
+        IERC20(strikeAsset).transfer(seller, strikePrice);
 
         //Self destruct contract once it has been executed
         selfdestruct(payable(buyer));
@@ -95,10 +100,14 @@ contract Forward{
 
     }
 
-    function trasnfer(uint256 _amount, address payable _asset) public{
+      function getBalance2(address _token) public view returns(uint256){
+        return IERC20(_token).balanceOf(msg.sender);
+    }
 
-        IERC20(_asset).allowance(msg.sender, address(this));
+    function transfer(uint256 _amount, address payable _asset) public{
+
         //IERC20(_asset).approve(address(this), _amount);
+        //IERC20(_asset).allowance(msg.sender, address(this));
 
         IERC20(_asset).transferFrom(msg.sender, address(this), _amount);
 
