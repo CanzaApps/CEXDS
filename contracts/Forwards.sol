@@ -24,9 +24,14 @@
         //Boolean to activate contract
         bool public contractActive;
 
+        //Transaction Fee
+        uint256 public txFee = 3;
+        address public treasuryAddress = 0x4B20993Bc481177ec7E8f571ceCaE8A9e22C02db;
+
+        //Deposit structs
         mapping(address=>bool) public deposited;
         
-        
+    
         struct Deposits {
 
             address assetAddress;
@@ -111,14 +116,14 @@
 
             //Updates the userBalances mapping to have the required data available
             userBalances[msg.sender].assetAddress = _asset;
-            userBalances[msg.sender].assetBalance = _quantity;
+            userBalances[msg.sender].assetBalance += _quantity;
             userBalances[msg.sender].depositTimestamp = block.timestamp;
 
             //Activates the contract if both buyer and seller has deposited
             contractActive = deposited[buyer] && deposited[seller];
         }
 
-        //Allows function to execute
+        //Function to execute contract
         function executeForward() public{
             
             //Checks that contract is active (i.e. the seller has deposited his amount)
@@ -127,18 +132,45 @@
             //Require that the contract expiry is passed before contract and be executed
             require(block.timestamp >= expiry, "Contract has not matured");
 
+            //Calculate Fees
+            uint256 underlyingFee = txFee*underlyingQuantity/1000;
+            uint256 strikeFee = txFee*strikePrice/1000;
+
             //Send underlying assets to buyer
             //IERC20(underlyingAsset).transferFrom(address(this), buyer , underlyingQuantity);
-            IERC20(underlyingAsset).transfer(buyer , underlyingQuantity);
+            IERC20(underlyingAsset).transfer(buyer , underlyingQuantity-underlyingFee);
             
             //Send strike assets to seller
             //IERC20(strikeAsset).transferFrom(address(this), seller, strikePrice);
-            IERC20(strikeAsset).transfer(seller, strikePrice);
+            IERC20(strikeAsset).transfer(seller, strikePrice-strikeFee);
+
+            //Transfer To Treasury
+            IERC20(underlyingAsset).transfer(treasuryAddress, underlyingFee);
+            IERC20(strikeAsset).transfer(treasuryAddress, strikeFee);
 
             //Self destruct contract once it has been executed
-            selfdestruct(payable(buyer));
+            selfdestruct(payable(deployer));
         }
 
+        //Cancel Contract
+        function cancelContract() public {
+
+            require(!contractActive && (msg.sender == deployer || msg.sender == counterParty) , "Contract is active or you are not the deployer");
+
+            IERC20(strikeAsset).transfer(buyer, strikePrice);
+            IERC20(underlyingAsset).transfer(seller , underlyingQuantity);            
+
+            selfdestruct(payable(deployer));
+
+        }
+
+        function setTreasuryAddress  (address _treasuryAddress)public{
+            
+            require(deployer == msg.sender, "You are not deployer");
+            treasuryAddress = _treasuryAddress;
+
+        }
+                
         //Test Functions
         function getBalance(address _assetAddress) public view returns (uint256) {
             
@@ -164,6 +196,5 @@
 
             expiry = block.timestamp;
         }
-
 
     }
