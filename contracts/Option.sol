@@ -34,6 +34,11 @@
         //American or European
         bool public put;
 
+        //Transaction Fees
+        uint256 public txFee = 3;
+        address public treasuryAddress = 0x4B20993Bc481177ec7E8f571ceCaE8A9e22C02db;
+
+
         //Deposit Struct
         mapping(address=>bool) public deposited;
         
@@ -123,12 +128,19 @@
 
             address _asset = premiumAsset;
             uint256 _quantity = premiumQuantity;
+            uint256 premiumFee;
+
+            premiumFee = txFee*premiumQuantity/1000;
 
             require(_quantity <= IERC20(_asset).balanceOf(msg.sender),"Not Enough Balance");
             
             //Transfers tokens to the sender
-            IERC20(_asset).transferFrom(msg.sender, seller, _quantity);
+            IERC20(_asset).transferFrom(msg.sender, seller, _quantity-premiumFee);
 
+            //Transfer tokens to treasury
+            IERC20(_asset).transferFrom(msg.sender, treasuryAddress, premiumFee);
+
+            //Activate Contract
             contractActive = true;
         }
 
@@ -142,6 +154,10 @@
             uint256 _quantityPaid;
             address _assetReceived;
             uint256 _quantityReceived;
+
+            uint256 paidFee;
+            uint256 receivedFee;
+
 
             if (!put){
                 //Call options pay the strike and receive the underlying
@@ -157,11 +173,43 @@
                 _quantityReceived = strikePrice;
             } 
 
+
+            //Calculate Transaction Fee
+            paidFee = txFee * _quantityPaid / 1000;
+            receivedFee = txFee * _quantityReceived / 1000;
+             
+
             require(_quantityPaid <= IERC20(_assetPaid).balanceOf(msg.sender),"Not Enough Balance");
             
             //Transfers tokens to the sender
-            IERC20(_assetPaid).transferFrom(msg.sender, seller, _quantityPaid);
-            IERC20(_assetReceived).transfer(buyer, _quantityReceived);
+            IERC20(_assetPaid).transferFrom(msg.sender, seller, _quantityPaid-paidFee);
+            IERC20(_assetReceived).transfer(buyer, _quantityReceived-receivedFee);
+
+            //Transfers to treasury
+            IERC20(_assetPaid).transferFrom(msg.sender, treasuryAddress, paidFee);
+            IERC20(_assetReceived).transfer(treasuryAddress, receivedFee);
+
+        }
+
+        function undwind () public {
+            //Allows user to unwind a position if the option has expired
+
+            require(expiry <= block.timestamp, "Contract has not expired yet");
+            
+            //Returns underlying assets to seller if option has expired
+            
+            address _asset;
+            uint256 _quantity;
+            
+            if (!put){
+                _asset = underlyingAsset;
+                _quantity = underlyingQuantity;
+            } else{
+                _asset = strikeAsset;
+                _quantity = strikePrice;
+            }
+
+            IERC20(_asset).transfer(buyer, _quantity);
 
 
         }
