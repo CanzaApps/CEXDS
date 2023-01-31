@@ -103,8 +103,8 @@ contract cashSwaps {
         _transferFrom(margin);
 
         //Activates the contract if both buyer and seller has deposited
+        deposited[msg.sender] = true;
         contractActive = deposited[buyer] && deposited[seller];        
-
     }   
 
     function executeContract() public payable{
@@ -198,7 +198,7 @@ contract cashSwaps {
         return sellerRate = _rate;
     }
 
-    function _transferFrom(uint256 _amount) public {
+    function _transferFrom(uint256 _amount) internal {
         require(
             IERC20(strikeAsset).balanceOf(msg.sender) >=
             _amount,
@@ -214,7 +214,7 @@ contract cashSwaps {
         if (!transferSuccess) revert();
     }
 
-    function _transferTo (uint256 _amount, address _user) public{
+    function _transferTo (uint256 _amount, address _user) internal {
         bool transferSuccess = IERC20(strikeAsset).transfer(
         _user,
         _amount
