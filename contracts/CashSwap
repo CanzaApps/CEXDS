@@ -46,6 +46,22 @@ contract cashSwaps {
     //Contract active boolean, for when both parties have deposited assets
     bool public contractActive;
 
+    event Deposit(
+        address indexed _depositor,
+        address indexed _strikeAsset,
+        uint256 _amount
+    );
+
+    event Exectuted(
+        address indexed _buyer,
+        address indexed _seller,
+        address indexed _strikeAsset,
+        uint256 _buyerPayout,
+        uint256 _sellerPayout,
+        uint256 _buyerExcessReturned,
+        uint256 _sellerExcessReturned
+    );
+
     constructor (bool _buyerFloating, 
                 bool _sellerFloating, 
                 uint256 _buyerFixedRate,  
@@ -104,7 +120,9 @@ contract cashSwaps {
 
         //Activates the contract if both buyer and seller has deposited
         deposited[msg.sender] = true;
-        contractActive = deposited[buyer] && deposited[seller];        
+        contractActive = deposited[buyer] && deposited[seller];
+
+        emit Deposit(msg.sender, strikeAsset, margin);    
     }   
 
     function executeContract() public payable{
@@ -124,6 +142,8 @@ contract cashSwaps {
         uint256 sellerRemainingMargin = margin - buyerPayout;
         uint256 sellerTransfer = sellerRemainingMargin + sellerPayout;
         _transferTo(sellerTransfer, seller);
+
+        emit Exectuted(buyer, seller, strikeAsset, buyerPayout, sellerPayout, buyerRemainingMargin, sellerRemainingMargin);
 
         //Halt & Catch Fire
         selfdestruct(payable(deployer));
