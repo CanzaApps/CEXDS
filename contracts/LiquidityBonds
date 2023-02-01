@@ -17,16 +17,17 @@ contract LiquidityBond {
 
     uint256 public bondsOutstanding;
     uint256 public bondsSoldTotal;
+    uint256 public debtOutstanding;
     
     address public strikeAsset;
     address public bondAddress;
 
-    uint256 public time_frac;
-    
     uint256 public interestRate;
     uint256 public cashSweep;
 
-    uint256 public debtOutstanding;
+    uint256 public time_frac = 31557600;
+    uint256 public lastAction;
+
 
     function setBondAddress(address _address) public{
         bondAddress = _address;
@@ -62,7 +63,16 @@ contract LiquidityBond {
         //record debt balance
         debtOutstanding += _amount;
 
+        lastAction = block.timestamp;
 
+
+    }
+
+    function interestAccrued() public view returns (uint256) {
+
+        uint256 interest;
+        interest = debtOutstanding * interestRate * (block.timestamp-lastAction) / (time_frac*10e5);
+        return interest;  
     }
 
     function debtAccrued() public {
@@ -104,7 +114,7 @@ contract BondToken is Context, ERC20 {
     /**
      * @dev Constructor that gives _msgSender() all of existing tokens.
      */
-    constructor () ERC20("Bond", "b") {
+    constructor () ERC20("Baki Bond", "bBaki") {
     }
 
     function mintBonds(address _user, uint256 _amount) public {
