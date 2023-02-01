@@ -1,0 +1,115 @@
+// SPDX-License-Identifier: MIT
+
+/**
+ * NOTE
+ * Always do additions first
+ * Check if the substracting value is greater than or less than the added values i.e check for a negative result
+ */
+
+pragma solidity ^0.8.17;
+
+import "@openzeppelin/contracts/utils/Context.sol";
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "./libraries/WadRayMath.sol";
+import "@openzeppelin/contracts/utils/math/Math.sol";
+
+contract LiquidityBond {
+
+    uint256 public bondsOutstanding;
+    uint256 public bondsSoldTotal;
+    
+    address public strikeAsset;
+    address public bondAddress;
+
+    uint256 public time_frac;
+    
+    uint256 public interestRate;
+    uint256 public cashSweep;
+
+    uint256 public debtOutstanding;
+
+    function setBondAddress(address _address) public{
+        bondAddress = _address;
+    }
+
+    function setSrikeAsset(address _address) public{
+        strikeAsset = _address;
+    }
+
+
+    function issueBonds(uint256 _amount) public {
+        //Add new bonds to be minted
+        //Needs to be only owner        
+        bondsOutstanding += _amount;
+    }
+    
+    function buyBond(uint256 _amount) public {
+        require (bondsOutstanding!=0, "No bonds to buy");
+        require(bondsOutstanding >= _amount, "Buying too Many bonds");
+
+        //Transfer purchase asset to contract
+        _transferFrom(_amount);
+
+        //Mint bonds for users as receipts of deposit
+        BondToken(bondAddress).mintBonds(msg.sender ,_amount);
+
+        //reduce bonds available for purchase
+        bondsOutstanding -= _amount;
+        
+        //record total bond sales
+        bondsSoldTotal += _amount;
+
+        //record debt balance
+        debtOutstanding += _amount;
+
+
+    }
+
+    function debtAccrued() public {
+
+        //debtOutstanding  =+ interest - (interestPaid + cashSweepPaid); 
+
+    }
+
+
+    function _transferFrom(uint256 _amount) internal {
+        require(
+            IERC20(strikeAsset).balanceOf(msg.sender) >=
+            _amount,
+            "Insufficient balance"
+        );
+        
+            bool transferSuccess = IERC20(strikeAsset).transferFrom(
+            msg.sender,
+            address(this),
+            _amount
+        );
+
+        if (!transferSuccess) revert();
+    }
+
+    function _transferTo (uint256 _amount, address _user) internal {
+        bool transferSuccess = IERC20(strikeAsset).transfer(
+        _user,
+        _amount
+        );
+
+        if (!transferSuccess) revert();
+
+    }
+}
+
+contract BondToken is Context, ERC20 {
+
+    /**
+     * @dev Constructor that gives _msgSender() all of existing tokens.
+     */
+    constructor () ERC20("Bond", "b") {
+    }
+
+    function mintBonds(address _user, uint256 _amount) public {
+        _mint(_user, _amount);
+
+    }
+
+}
