@@ -48,7 +48,20 @@ contract Deployer{
     }
 
     function getUserForwards(address _address) external view returns (address[] memory) {
+        //address[] memory allUserForwards ;
+        //address[] memory activeForwards;
+        //Forward a;
+
+        //for(uint256 i = 0; i < userForwards[_address].length; i++) {
+        //    allUserForwards = userForwards[_address];
+        //    a = Forward(address(allUserForwards[i]));
+        //    if(a.contractActive() == true || a.awaitingDeposit() == true){
+        //        activeForwards[i] = address(a);
+        //    }
+        //}
+
+        //return activeForwards;
+
         return userForwards[_address];
     }
-
 }
