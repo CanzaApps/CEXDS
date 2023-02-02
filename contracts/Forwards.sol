@@ -49,8 +49,8 @@
         //consider swapping this into a constructor so that this deploys the contracts with the relevant parameters required
         constructor(address _strikeAsset,uint256 _strikePrice, address _underlyingAsset, uint256 _underlyingQuantity, address _buyerAddress, address _sellerAddress, uint256 _days) payable {
             
-            //Require that contract is not active
-            require(msg.sender == _buyerAddress || msg.sender == _sellerAddress, "Deployer needs to be either buyer or seller");        
+            //Commented out to allow for deployer script
+            //require(msg.sender == _buyerAddress || msg.sender == _sellerAddress, "Deployer needs to be either buyer or seller");        
             
             //Sets strike parameters
             strikeAsset = _strikeAsset;
