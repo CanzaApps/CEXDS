@@ -1,5 +1,5 @@
-    //SPDX-License-Identifier: MIT
-    pragma solidity ^0.8.0;
+//SPDX-License-Identifier: MIT
+    pragma solidity ^0.8.17;
 
     import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
@@ -23,6 +23,7 @@
 
         //Boolean to activate contract
         bool public contractActive;
+        bool public awaitingDeposit;
 
         //Transaction Fee
         uint256 public txFee = 3;
@@ -49,7 +50,6 @@
         //consider swapping this into a constructor so that this deploys the contracts with the relevant parameters required
         constructor(address _strikeAsset,uint256 _strikePrice, address _underlyingAsset, uint256 _underlyingQuantity, address _buyerAddress, address _sellerAddress, uint256 _days) payable {
             
-            //Commented out to allow for deployer script
             //require(msg.sender == _buyerAddress || msg.sender == _sellerAddress, "Deployer needs to be either buyer or seller");        
             
             //Sets strike parameters
@@ -75,9 +75,13 @@
 
             }//Consider logic that can allow for third party deployments
 
-        
+            //Flags that awaiting deposit
+            awaitingDeposit = true;
+
             //Sets expiry
             expiry = block.timestamp + _days*60*24;
+
+            
 
         }
 
@@ -120,7 +124,11 @@
             userBalances[msg.sender].depositTimestamp = block.timestamp;
 
             //Activates the contract if both buyer and seller has deposited
-            contractActive = deposited[buyer] && deposited[seller];
+            if( deposited[buyer] && deposited[seller]){
+                contractActive = true;
+                awaitingDeposit = false;
+            }
+            
         }
 
         //Function to execute contract
