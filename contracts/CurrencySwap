@@ -159,9 +159,9 @@ contract CurrencySwap {
             payout = payout * notionalBalance * 10e5 / actualPrice;
             payout = payout/10e5;
             payout = Math.min(payout, marginValue);
-            
-            user[buyer].marginAccountBalance -= payout;
-            user[seller].marginAccountBalance += payout;
+
+            user[buyer].marginAccountBalance += payout;
+            user[seller].marginAccountBalance -= payout;
 
         } else if ( actualPrice < strikePrice){
             payee = seller;
@@ -289,7 +289,8 @@ contract deployer {
 
         count ++;
         swapList.push(address(swapContract));
-        userSwaps[msg.sender].push(address(swapContract));
+        userSwaps[_buyer].push(address(swapContract));
+        userSwaps[_seller].push(address(swapContract));
     }
 
     function getSwapList() external view returns (address[] memory) {
