@@ -11,14 +11,13 @@ pragma solidity ^0.8.18;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/utils/math/Math.sol";
 
-
 contract CurrencySwap {
     
     //Strike Price is the agreed price they buyer pays to the seller.
-    uint256 strikePrice; 
+    uint256 public strikePrice; 
     
     //Actual Actual price at settlment date 
-    uint256 actualPrice;
+    uint256 public actualPrice;
 
     //Notional Balance * marginPercent = marginValue 
     uint256 public notionalBalance;
@@ -34,10 +33,9 @@ contract CurrencySwap {
     address public deployer;
 
     address public payee;
-    uint256 public payout;
 
     //Margin Account Balances
-    mapping(address=>uint256) public marginAccountBalance;
+    //mapping(address=>uint256) public marginAccountBalance;
 
     //Inputted Parameters for User
     struct UserInput{
@@ -77,9 +75,8 @@ contract CurrencySwap {
         address indexed _seller,
         address indexed _strikeAsset,
         uint256 _payout,
-        address _payee,
-        uint256 _buyerExcessReturned,
-        uint256 _sellerExcessReturned
+        uint256 _buyerMarginBalance,
+        uint256 _sellerMarginBalance
     );
 
 
@@ -96,7 +93,7 @@ contract CurrencySwap {
         //Set up notional amount and margin requirement
         notionalBalance = _notionalBalance;
         marginPercent = _marginPercent;
-        marginValue = notionalBalance * marginPercent / 10e5;
+        marginValue = notionalBalance * marginPercent / 10e4;
         
         //Identify who is the buyer and who is the seller of the asset
         buyer = _buyer;
@@ -143,8 +140,7 @@ contract CurrencySwap {
 
         require(agreePrice(), "Price is not Agreed");
 
-
-
+        uint256 payout;
 
 
         //Decide who gets paid buyer or seller
@@ -154,8 +150,6 @@ contract CurrencySwap {
         //Buyer gets paid if rates increase
         //Seller gets paid if rates decrease
 
-
-
         if (actualPrice > strikePrice){
 
             payee = buyer;
@@ -164,6 +158,10 @@ contract CurrencySwap {
             payout  = actualPrice - strikePrice;
             payout = payout * notionalBalance * 10e5 / actualPrice;
             payout = payout/10e5;
+            payout = Math.min(payout, marginValue);
+            
+            user[buyer].marginAccountBalance -= payout;
+            user[seller].marginAccountBalance += payout;
 
         } else if ( actualPrice < strikePrice){
             payee = seller;
@@ -172,34 +170,23 @@ contract CurrencySwap {
             payout  = actualPrice - strikePrice;
             payout = payout * notionalBalance * 10e5 / actualPrice;
             payout = payout/10e5;
+            payout = Math.min(payout, marginValue);
+
+            user[buyer].marginAccountBalance -= payout;
+            user[seller].marginAccountBalance += payout;
 
         }else{
             payout = 0;
         }
 
-
-
-        //Not Useful yet, will be more useful when withdraw replaces direct payout
-        if (payee == buyer){
-            marginAccountBalance[seller] -= payout;
-            marginAccountBalance[buyer] += payout;
-            
-
-
-        } else {
-            marginAccountBalance[buyer] -= payout;
-            marginAccountBalance[seller] += payout;
-        }
-
         //Payout both users
-        _transferTo(marginAccountBalance[buyer], buyer);
-        _transferTo(marginAccountBalance[seller], seller);
+        _transferTo(user[buyer].marginAccountBalance, buyer);
+        _transferTo(user[seller].marginAccountBalance, seller);
 
-
-        //emit Exectuted(buyer, seller, strikeAsset, payout, marginAccountBalance[buyer], marginAccountBalance[seller]);
+        emit Exectuted(buyer, seller, strikeAsset, payout, user[buyer].marginAccountBalance, user[seller].marginAccountBalance);
 
         //Halt & Catch Fire
-        selfdestruct(payable(deployer));
+        //selfdestruct(payable(deployer));
 
     } 
     
@@ -238,8 +225,6 @@ contract CurrencySwap {
         return priceAgreed;
 
     }
-
-    
 
     function _transferFrom(uint256 _amount) internal {
         require(
@@ -316,7 +301,5 @@ contract deployer {
         return userSwaps[_address];
     
     }
-
-
 
 }
