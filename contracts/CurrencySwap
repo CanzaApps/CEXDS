@@ -186,7 +186,7 @@ contract CurrencySwap {
         emit Exectuted(buyer, seller, strikeAsset, payout, user[buyer].marginAccountBalance, user[seller].marginAccountBalance);
 
         //Halt & Catch Fire
-        //selfdestruct(payable(deployer));
+        selfdestruct(payable(deployer));
 
     } 
     
@@ -215,7 +215,8 @@ contract CurrencySwap {
         //If one party has entered a price and the other has entered one by expiry then True
         else if(
             block.timestamp > expiry &&
-            (user[buyer].hasInputedPrice || user[seller].hasInputedPrice)
+            (user[buyer].hasInputedPrice || user[seller].hasInputedPrice) &&
+            (user[buyer].inputPriceValue == 0 || user[seller].inputPriceValue == 0)
         ){
             priceAgreed = true;
             actualPrice = Math.max(user[buyer].inputPriceValue, user[seller].inputPriceValue);
