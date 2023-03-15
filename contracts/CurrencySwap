@@ -30,7 +30,7 @@ contract CurrencySwap {
     
     address public buyer;
     address public seller;
-    address public deployer;
+    address public deployerAddress;
 
     address public payee;
 
@@ -60,6 +60,9 @@ contract CurrencySwap {
 
     //Contract active boolean, for when both parties have deposited assets
     bool public contractActive;
+
+    //Contract executed boolean
+    bool public contractExecuted;
 
     //Boolean for when both parties have agreed on price and the contract can be executed
     bool public priceAgreed;
@@ -98,7 +101,7 @@ contract CurrencySwap {
         //Identify who is the buyer and who is the seller of the asset
         buyer = _buyer;
         seller = _seller;
-        deployer = msg.sender;
+        deployerAddress = msg.sender;
 
         //Identify the strike asset for the transactions
         strikeAsset = _strikeAsset;
@@ -112,8 +115,11 @@ contract CurrencySwap {
 
     function deposit() public payable{
 
+        
+        require(!contractExecuted, "Contract has been executed");
+        
         //Require depositor to be either buyer or seller
-        require(msg.sender == buyer || msg.sender == seller, "Sender is neither buyer or seller");
+        require(msg.sender == buyer || msg.sender == seller);
 
         //Require that depositor has deposited
         require(!user[msg.sender].deposited, "You have already deposited");
@@ -134,6 +140,8 @@ contract CurrencySwap {
 
     function executeContract() public payable{
 
+        require(!contractExecuted, "Contract has been executed");
+        
         require(contractActive, "Contract is not Active");
 
         require(block.timestamp >= expiry, "Contract Has not expired");
@@ -186,7 +194,9 @@ contract CurrencySwap {
         emit Exectuted(buyer, seller, strikeAsset, payout, user[buyer].marginAccountBalance, user[seller].marginAccountBalance);
 
         //Halt & Catch Fire
-        selfdestruct(payable(deployer));
+        contractExecuted = true;
+
+        //selfdestruct(payable(deployerAddress));
 
     } 
     
@@ -194,7 +204,7 @@ contract CurrencySwap {
     function setActualPrice (uint256 _price) public {
 
         require(msg.sender == buyer || msg.sender == seller, "Sender is neither buyer or seller");
-
+        require(!contractExecuted, "Contract has been executed");
 
         user[msg.sender].inputPriceValue = _price;
         user[msg.sender].hasInputedPrice = true;
@@ -259,10 +269,16 @@ contract deployer {
     CurrencySwap public swapContract;
 
     struct Contract{
-        address contractAddress;
-        address contractBuyer;
-        address contractSeller;
+        uint256 notionalBalance;
+        uint256 marginPercent;
+        address buyer;
+        address seller;
+        address strikeAsset;
+        uint256 strikePrice;
+        uint256 daysToExpiry;
+        bool contractExecuted;
     }
+    mapping (address=>Contract) swapData ;
 
     address[] public swapList;
     uint256 public count;
@@ -278,6 +294,9 @@ contract deployer {
         uint256 _daysToExpiry) 
     
     public {
+        
+        address  buyer = _buyer;
+        address  seller = _seller;
 
         swapContract = new CurrencySwap (
         _notionalBalance,
@@ -288,10 +307,26 @@ contract deployer {
         _strikePrice,
         _daysToExpiry);
 
+        address contractAddress = address(swapContract);
+        
         count ++;
-        swapList.push(address(swapContract));
-        userSwaps[_buyer].push(address(swapContract));
-        userSwaps[_seller].push(address(swapContract));
+        swapList.push(contractAddress);
+        userSwaps[_buyer].push(contractAddress);
+        userSwaps[_seller].push(contractAddress);
+
+//        swapData[contractAddress].contractBuyer = buyer;
+//        swapData[contractAddress].contractSeller = seller;
+
+
+        //Load data into contract
+        swapData[contractAddress].notionalBalance = _notionalBalance;
+        swapData[contractAddress].marginPercent = _marginPercent;
+        swapData[contractAddress].buyer= buyer;
+        swapData[contractAddress].seller =seller;
+        swapData[contractAddress].strikeAsset = _strikeAsset;
+        swapData[contractAddress].strikePrice = _strikePrice;
+        swapData[contractAddress].daysToExpiry = _daysToExpiry;
+
     }
 
     function getSwapList() external view returns (address[] memory) {
@@ -301,6 +336,30 @@ contract deployer {
     function getUserSwaps(address _address) external view returns (address[] memory) {
         
         return userSwaps[_address];
+
+    }
+
+    //Need to refactor a dedicated function so that can send direct from user wallet through deployer
+    function depositInContract(address _contract) public {
+        
+        //require(msg.sender == )
+
+
+        CurrencySwap(_contract).deposit();
+
+    }
+
+    //Need to refactor to identify who is impacting the price
+    function setPriceInContract(address _contract, uint256 _actualPrice) public {
+    
+        CurrencySwap(_contract).setActualPrice(_actualPrice);
+    
+    }
+
+    //This can work with the existing logic because only buyer or  seller will be paid
+    function executeSwapContract(address _contract) public {
+    
+        CurrencySwap(_contract).executeContract();
     
     }
 
