@@ -1,7 +1,7 @@
 pragma solidity ^0.8.18;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-contract CreditDefaultSwap {
+contract CDS {
 
     //Loan Data
     string public loanName;
@@ -24,6 +24,8 @@ contract CreditDefaultSwap {
     //Mapping for Seller Data
     mapping (address=>SellerData) public sellers;
     address[] public sellerList;
+    mapping(address=>bool) public onSellerList;
+
 
     //Buyer Data
     struct BuyerData{
@@ -35,6 +37,7 @@ contract CreditDefaultSwap {
     //Mapping for Buyer Data
     mapping(address=>BuyerData) public  buyers;
     address[] public buyerList;
+    mapping(address=>bool) public onBuyerList;
 
     //Collateral Variables
     uint256 public depositedCollateral_Total;
@@ -53,7 +56,30 @@ contract CreditDefaultSwap {
     bool executed;
 
     constructor(
+        /*
+        string memory _loanName,
+        */
+        address _currency
+        /*
+        uint256 _interestRate,
+        uint256 _maturityDate,
+        string memory _status,
+        uint256 _premium
+        */
+
     ){
+        /*
+        
+        loanName = _loanName;
+        */
+        currency = _currency;
+        /*
+        interestRate = _interestRate;
+        maturityDate =  _maturityDate;
+        status = _status;
+        premium =  _premium;
+        */
+
         premium  = 5000;
     }
 
@@ -71,13 +97,17 @@ contract CreditDefaultSwap {
         depositedCollateral_Total += _amount;
         availableCollateral_Total += _amount;
 
-        sellerList.push(msg.sender);
+        if(!onSellerList[msg.sender]){
+                sellerList.push(msg.sender);
+                onSellerList[msg.sender] = true;
+        }
+
 
     }
 
     function withdraw(uint256 _amount) public payable {
 
-        require( sellers[msg.sender].availableCollateral <= _amount, "Not enough unlocked collateral" );
+        require( _amount <= sellers[msg.sender].availableCollateral , "Not enough unlocked collateral" );
 
         _transferTo(_amount, msg.sender);
         
@@ -146,8 +176,12 @@ contract CreditDefaultSwap {
         unclaimedPremium_Total +=premiumPayable;
         collateralCovered_Total += _amount;        
 
-        buyerList.push(msg.sender);
+        if(!onBuyerList[msg.sender]){
+            buyerList.push(msg.sender);
+            onBuyerList[msg.sender] = true;
 
+        }
+        
 
     }
 
@@ -176,7 +210,6 @@ contract CreditDefaultSwap {
         buyers[msg.sender].claimableCollateral = 0;
 
         depositedCollateral_Total -= payableAmount;
-
 
     }
 
@@ -229,7 +262,6 @@ contract CreditDefaultSwap {
 
             }
         }
-            
         
     }
     
