@@ -1,7 +1,7 @@
 pragma solidity ^0.8.18;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-contract CDS {
+contract CreditDefaultSwap {
 
     //Loan Data
     string public loanName;
@@ -192,6 +192,20 @@ contract CDS {
         _transferTo(payableAmount, msg.sender);
 
         sellers[msg.sender].unclaimedPremium -= payableAmount;
+        
+
+        for (uint256 i = 0; i < sellerList.length; i++){
+            address _address = sellerList[i];
+
+            //Calculate change in collateral
+            uint256 w  = payableAmount * sellers[_address].depositedCollateral * 1000 / depositedCollateral_Total;
+            w = w/1000;
+            
+            sellers[_address].depositedCollateral -= w;
+        
+        }
+
+        depositedCollateral_Total -= payableAmount; 
 
 
     }
@@ -299,5 +313,53 @@ contract CDS {
 
 }
 
+contract deployer {
 
+    CreditDefaultSwap public swapContract;
 
+    address[] public swapList;
+    uint256 public count;
+    mapping (address=>address[]) public userSwaps;
+
+    function createSwapContract (
+        /*
+        string memory _loanName,
+        */
+        address _currency
+        /*
+        uint256 _interestRate,
+        uint256 _maturityDate,
+        string memory _status,
+        uint256 _premium
+        */
+
+    )public{
+
+        swapContract = new CreditDefaultSwap(
+            /*
+            string memory _loanName,
+            */
+            _currency
+            /*
+            uint256 _interestRate,
+            uint256 _maturityDate,
+            string memory _status,
+            uint256 _premium
+            */
+        );
+
+        address contractAddress = address(swapContract);
+
+        //Add to master list
+        swapList.push(contractAddress);
+
+        //Add to list searchable by user
+        userSwaps[msg.sender].push(contractAddress);        
+    }
+
+    function getSwapList() external view returns (address[] memory) {
+        return swapList;
+    }
+
+    
+}
