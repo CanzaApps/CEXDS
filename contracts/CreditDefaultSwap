@@ -230,12 +230,18 @@ contract CreditDefaultSwap {
     
     function execute(bool _default) public { 
     //Execute contract and change variable for a default event
+
         
         if(!executed){
             
             //@DEV TODO Replace with Call Oracle
             defaulted = _default;            
-            
+
+            bool condition1 = (maturityDate <= block.timestamp);
+
+            require (condition1 || defaulted, "Not at maturity or defaulted");
+
+
             if(defaulted){
                 //Handle buyer adjustments on liquidation
                 for(uint256 i=0; i < buyerList.length; i++){
@@ -310,6 +316,7 @@ contract CreditDefaultSwap {
     function setCurrency(address _address) public {
         currency = _address;
     }
+    
 
 }
 
@@ -361,5 +368,5 @@ contract deployer {
         return swapList;
     }
 
-    
+
 }
