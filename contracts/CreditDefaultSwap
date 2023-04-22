@@ -1,3 +1,4 @@
+//SPDX-License-Identifier: Unlicensed
 pragma solidity ^0.8.18;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
@@ -10,7 +11,8 @@ contract CreditDefaultSwap {
     uint256 public maturityDate;
     string public status;
     bool public defaulted;
-
+    uint256 public loanID;
+    string public loanURL;
 
     //Seller Data
     struct SellerData {
@@ -56,31 +58,25 @@ contract CreditDefaultSwap {
     bool executed;
 
     constructor(
-        /*
         string memory _loanName,
-        */
-        address _currency
-        /*
+        address _currency,
         uint256 _interestRate,
         uint256 _maturityDate,
         string memory _status,
-        uint256 _premium
-        */
+        uint256 _premium,
+        uint256 _loanID,
+        string memory _loanURL
 
     ){
-        /*
-        
+                
         loanName = _loanName;
-        */
         currency = _currency;
-        /*
         interestRate = _interestRate;
         maturityDate =  _maturityDate;
         status = _status;
         premium =  _premium;
-        */
-
-        premium  = 5000;
+        loanID = _loanID;
+        loanURL = _loanURL;
     }
 
     function deposit(uint256 _amount) public payable {
@@ -130,7 +126,7 @@ contract CreditDefaultSwap {
         //Handle premium calculation & payment        
 
         //@DEV-TODO does this need to be dyanmic for different dates?
-        uint256 premiumPayable  = _amount * premium / 100000;
+        uint256 premiumPayable  = _amount * premium / 10000;
 
         _transferFrom(premiumPayable);
 
@@ -311,11 +307,6 @@ contract CreditDefaultSwap {
         if (!transferSuccess) revert();
 
     }
-
-    //@DEV TODO REMOVE ONCE CONSTRUCTOR BUILT UP
-    function setCurrency(address _address) public {
-        currency = _address;
-    }
     
 
 }
@@ -328,32 +319,49 @@ contract deployer {
     uint256 public count;
     mapping (address=>address[]) public userSwaps;
 
+    mapping (uint256=>bool) public deployedLoanIDs;
+
     function createSwapContract (
-        /*
+        
         string memory _loanName,
-        */
-        address _currency
-        /*
+        address _currency,
         uint256 _interestRate,
         uint256 _maturityDate,
         string memory _status,
-        uint256 _premium
-        */
+        uint256 _premium,
+        uint256 _loanID,
+        string memory _loanURL
 
     )public{
 
+        require (!deployedLoanIDs[_loanID],"Loan has been already issued");
+        
+        bool statusCurrent;
+        
+        if (bytes(_status).length == bytes("current").length){
+            statusCurrent = 
+            (
+                keccak256(abi.encodePacked(_loanID)) == 
+                keccak256(abi.encodePacked(_loanID))
+            );
+        }
+        require (statusCurrent,"Loan is not Current");
+
         swapContract = new CreditDefaultSwap(
-            /*
-            string memory _loanName,
-            */
-            _currency
-            /*
-            uint256 _interestRate,
-            uint256 _maturityDate,
-            string memory _status,
-            uint256 _premium
-            */
+
+            _loanName,
+            _currency,            
+            _interestRate,
+            _maturityDate,
+            _status,
+            _premium,
+            _loanID,
+            _loanURL
+
         );
+
+        //Add loan ID to mapping so that it cannot be re-deployed
+        deployedLoanIDs[_loanID] = true;
 
         address contractAddress = address(swapContract);
 
@@ -368,5 +376,6 @@ contract deployer {
         return swapList;
     }
 
-
 }
+
+
