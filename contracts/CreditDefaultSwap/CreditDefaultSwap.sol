@@ -1,5 +1,7 @@
-//SPDX-License-Identifier: Unlicensed
+// SPDX-License-Identifier: MIT
+
 pragma solidity ^0.8.18;
+
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract CreditDefaultSwap {
@@ -7,10 +9,10 @@ contract CreditDefaultSwap {
     string public loanName;
     address public currency;
     uint256 public interestRate;
-    uint256 public maturityDate;
+    string public maturityDate;
     string public status;
     bool public defaulted;
-    uint256 public loanID;
+    string public loanID;
     string public loanURL;
 
     //Seller Data
@@ -59,10 +61,10 @@ contract CreditDefaultSwap {
         string memory _loanName,
         address _currency,
         uint256 _interestRate,
-        uint256 _maturityDate,
+        string memory _maturityDate,
         string memory _status,
         uint256 _premium,
-        uint256 _loanID,
+        string memory _loanID,
         string memory _loanURL
     ) {
         loanName = _loanName;

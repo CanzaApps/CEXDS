@@ -1,25 +1,25 @@
-//SPDX-License-Identifier: Unlicensed
+// SPDX-License-Identifier: MIT
+
 pragma solidity ^0.8.18;
 
 import "./CreditDefaultSwap.sol";
 
-contract Deployer {
+contract deployer {
     CreditDefaultSwap public swapContract;
 
     address[] public swapList;
-
     mapping(address => address[]) public userSwaps;
 
-    mapping(uint256 => bool) public deployedLoanIDs;
+    mapping(string => bool) public deployedLoanIDs;
 
     function createSwapContract(
         string memory _loanName,
         address _currency,
         uint256 _interestRate,
-        uint256 _maturityDate,
+        string memory _maturityDate,
         string memory _status,
         uint256 _premium,
-        uint256 _loanID,
+        string memory _loanID,
         string memory _loanURL
     ) public {
         require(!deployedLoanIDs[_loanID], "Loan has been already issued");
