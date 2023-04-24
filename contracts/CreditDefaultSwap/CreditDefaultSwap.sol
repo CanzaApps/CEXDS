@@ -3,17 +3,21 @@
 pragma solidity ^0.8.18;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "./libraries/DateTime.sol";
 
-contract CreditDefaultSwap {
+contract CreditDefaultSwap is DateTime {
     //Loan Data
     string public loanName;
     address public currency;
     uint256 public interestRate;
-    string public maturityDate;
     string public status;
     bool public defaulted;
     string public loanID;
     string public loanURL;
+
+    uint256 public maturity_day;
+    uint256 public maturity_month;
+    uint256 public maturity_year;
 
     //Seller Data
     struct SellerData {
@@ -61,7 +65,9 @@ contract CreditDefaultSwap {
         string memory _loanName,
         address _currency,
         uint256 _interestRate,
-        string memory _maturityDate,
+        uint256 _maturity_day,
+        uint256 _maturity_month,
+        uint256 _maturity_year,
         string memory _status,
         uint256 _premium,
         string memory _loanID,
@@ -70,7 +76,9 @@ contract CreditDefaultSwap {
         loanName = _loanName;
         currency = _currency;
         interestRate = _interestRate;
-        maturityDate = _maturityDate;
+        maturity_day = _maturity_day;
+        maturity_month = _maturity_month;
+        maturity_year = _maturity_year;
         status = _status;
         premium = _premium;
         loanID = _loanID;
@@ -216,8 +224,20 @@ contract CreditDefaultSwap {
         if (!executed) {
             //@DEV TODO Replace with Call Oracle
             defaulted = _default;
+            bool condition1;
 
-            bool condition1 = (maturityDate <= block.timestamp);
+            (uint _year, uint _month, uint _day) = timestampToDate(
+                block.timestamp
+            );
+            if (
+                maturity_day == _day &&
+                maturity_month == _month &&
+                maturity_year == _year
+            ) {
+                condition1 = true;
+            } else {
+                condition1 = false;
+            }
 
             require(condition1 || defaulted, "Not at maturity or defaulted");
 
