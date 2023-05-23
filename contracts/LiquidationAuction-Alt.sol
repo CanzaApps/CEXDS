@@ -111,6 +111,16 @@ contract poolContract {
 
     }
 
+    function claimRewards() public {
+
+        uint256 claimAmount = claimeableUser[msg.sender];
+        _transferTo(claimAmount, msg.sender);
+        
+        claimableTotal -= claimAmount;
+        claimeableUser[msg.sender] = 0;
+
+    }
+
     function _transferFrom(uint256 _amount) internal {
         require(
             IERC20(currency).balanceOf(msg.sender) >=
