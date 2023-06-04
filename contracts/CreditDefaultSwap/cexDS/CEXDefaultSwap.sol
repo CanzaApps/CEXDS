@@ -201,6 +201,11 @@ contract CEXDefaultSwap is DateTime, Ownable, ICreditDefaultSwap {
     }
 
     function claimPremium() external {
+        //Ensures execute happens before claim happens if pause event not active
+        if(!paused){
+            execute();
+        }
+
         uint256 payableAmount = sellers[msg.sender].unclaimedPremium;
 
         _transferTo(payableAmount, msg.sender);
@@ -270,14 +275,16 @@ contract CEXDefaultSwap is DateTime, Ownable, ICreditDefaultSwap {
         } else if (matured) {
 
             //Handle buyer adjustments for maturity
-            //Covered collateral reset to 0 
+            //Covered collateral reset to 0
+            //Premium paid reset to 0 
             for (uint256 i = 0; i < buyerList.length; i++) {
                 address _address = buyerList[i];
                 buyers[_address].collateralCovered = 0;
+                buyers[_address].premiumPaid = 0;
             }
 
             collateralCovered_Total = 0;
-
+            premiumPaid_Total = 0;
 
             //Handle seller adjustments for maturity
             //All collateral made available to depositors
