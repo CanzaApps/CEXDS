@@ -265,6 +265,7 @@ contract CEXDefaultSwap is DateTime, Ownable, ICreditDefaultSwap {
             
             //Pauses contract until reset
             paused = true;
+            status = "Defaulted";
 
         } else if (matured) {
 
@@ -308,12 +309,14 @@ contract CEXDefaultSwap is DateTime, Ownable, ICreditDefaultSwap {
     //@TODO-Only to be handled by multisig 
     function pause() external onlyOwner {
         paused = true;
+        status = "Paused";
     }
 
     function unpause() external onlyOwner{
         require(!defaulted, "Contract has defaulted, use default reset");
 
         paused = false;
+        status = "Active";
         execute();
     }
     
@@ -324,6 +327,7 @@ contract CEXDefaultSwap is DateTime, Ownable, ICreditDefaultSwap {
 
         defaulted = false;
         paused = false;
+        status = "Active";
         rollEpoch(_newMaturityDate);
 
     }
