@@ -1,50 +1,41 @@
 // SPDX-License-Identifier: MIT
-
 pragma solidity ^0.8.18;
 
-import "./CreditDefaultSwap.sol";
+import "./CEXDefaultSwap.sol";
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "./ICreditDefaultSwap.sol";
 
-contract deployer {
-    CreditDefaultSwap public swapContract;
+import "./ICreditDefaultSwap.sol";
+
+contract deployer is Ownable {
+    CEXDefaultSwap public swapContract;
 
     address[] public swapList;
     mapping(address => address[]) public userSwaps;
 
     mapping(string => bool) public deployedLoanIDs;
+    mapping(string => address) public loans;
 
     function createSwapContract(
-        string memory _loanName,
+        string memory _entityName,
         address _currency,
-        uint256 _interestRate,
-        string memory _maturityDate,
+        string memory _currency_name,
         string memory _status,
         uint256 _premium,
-        string memory _loanID,
-        string memory _loanURL
-    ) public {
-        require(!deployedLoanIDs[_loanID], "Loan has been already issued");
+        uint256 _initialMaturityDate,
+        uint256 _epochDays
 
-        bool statusCurrent;
+    ) public onlyOwner {
 
-        if (bytes(_status).length == bytes("current").length) {
-            statusCurrent = (keccak256(abi.encodePacked(_loanID)) ==
-                keccak256(abi.encodePacked(_loanID)));
-        }
-        require(statusCurrent, "Loan is not Current");
-
-        swapContract = new CreditDefaultSwap(
-            _loanName,
+        swapContract = new CEXDefaultSwap(
+            _entityName,
             _currency,
-            _interestRate,
-            _maturityDate,
+            _currency_name,
             _status,
             _premium,
-            _loanID,
-            _loanURL
+            _initialMaturityDate,
+            _epochDays
         );
-
-        //Add loan ID to mapping so that it cannot be re-deployed
-        deployedLoanIDs[_loanID] = true;
 
         address contractAddress = address(swapContract);
 
@@ -57,5 +48,21 @@ contract deployer {
 
     function getSwapList() external view returns (address[] memory) {
         return swapList;
+    }
+
+    function setPoolDefaulted(address _add, bool _val) external onlyOwner {
+        ICreditDefaultSwap(_add).setDefaulted(_val);
+    }
+
+    function setPoolPaused(address _add) external onlyOwner{
+        ICreditDefaultSwap(_add).pause();
+    }
+
+    function setPoolUnpaused(address _add) external onlyOwner{
+        ICreditDefaultSwap(_add).unpause();
+    }
+
+    function resetPoolAfterDefault(address _add, uint256 _newMaturityDate) external onlyOwner{
+        ICreditDefaultSwap(_add).resetAfterDefault(_newMaturityDate);
     }
 }
