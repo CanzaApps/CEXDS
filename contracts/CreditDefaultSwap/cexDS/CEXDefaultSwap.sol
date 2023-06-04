@@ -109,7 +109,10 @@ contract CEXDefaultSwap is DateTime, Ownable, ICreditDefaultSwap {
 
     function withdraw(uint256 _amount) external payable {
         
-        execute();
+        //Ensures execute happens before withdraw happens if pause event not active
+        if(!paused){
+            execute();
+        }
         
         require(
             _amount <= sellers[msg.sender].availableCollateral,
@@ -140,7 +143,7 @@ contract CEXDefaultSwap is DateTime, Ownable, ICreditDefaultSwap {
 
         //@DEV-TODO does this need to be dyanmic for different dates?
         
-        uint256 makerFeePayable = (_amount * makerFee) / 1000;
+        uint256 makerFeePayable = (_amount * makerFee) / 10000;
         
         uint256 premiumPayable = (_amount * premium) / 10000;
 
@@ -219,7 +222,6 @@ contract CEXDefaultSwap is DateTime, Ownable, ICreditDefaultSwap {
 
         buyers[msg.sender].claimableCollateral = 0;
 
-        depositedCollateral_Total -= payableAmount;
     }
 
     function execute() internal {
@@ -234,10 +236,14 @@ contract CEXDefaultSwap is DateTime, Ownable, ICreditDefaultSwap {
             //Handle buyer adjustments for default
             //buyers can now claim their covered collateral
             //Collateral Covered set to 0 
+
+
             for (uint256 i = 0; i < buyerList.length; i++) {
-                buyers[msg.sender].claimableCollateral = buyers[msg.sender]
+                address _address = buyerList[i];
+            
+                buyers[_address].claimableCollateral = buyers[_address]
                     .collateralCovered;
-                buyers[msg.sender].collateralCovered = 0;
+                buyers[_address].collateralCovered = 0;
             }
 
             claimableCollateral_Total += collateralCovered_Total;
@@ -245,14 +251,18 @@ contract CEXDefaultSwap is DateTime, Ownable, ICreditDefaultSwap {
 
             //Handle seller adjustments for default
             //Seller locked collateral set to 0
-            //No change to available collateral, is rolled forward for next epoch
-            //user can still withdraw
+            //Deposited collateral reduced for locked collateral
+            //Available collateral is rolled forward for next epoch
+            //user can still withdraw even when paused.
             for (uint256 i = 0; i < sellerList.length; i++) {
-                sellers[msg.sender].lockedCollateral = 0;
+                address _address = sellerList[i];
+                sellers[_address].depositedCollateral -= sellers[_address].lockedCollateral; 
+                sellers[_address].lockedCollateral = 0;
             }
 
+            depositedCollateral_Total -= lockedCollateral_Total;
             lockedCollateral_Total = 0;
-
+            
             //Pauses contract until reset
             paused = true;
 
@@ -261,7 +271,8 @@ contract CEXDefaultSwap is DateTime, Ownable, ICreditDefaultSwap {
             //Handle buyer adjustments for maturity
             //Covered collateral reset to 0 
             for (uint256 i = 0; i < buyerList.length; i++) {
-                buyers[msg.sender].collateralCovered = 0;
+                address _address = buyerList[i];
+                buyers[_address].collateralCovered = 0;
             }
 
             collateralCovered_Total = 0;
@@ -271,9 +282,10 @@ contract CEXDefaultSwap is DateTime, Ownable, ICreditDefaultSwap {
             //All collateral made available to depositors
             //Automatically rolled over
             for (uint256 i = 0; i < sellerList.length; i++) {
-                sellers[msg.sender].availableCollateral += 
-                   sellers[msg.sender].lockedCollateral;
-                sellers[msg.sender].lockedCollateral = 0;
+                address _address = sellerList[i];
+                sellers[_address].availableCollateral += 
+                   sellers[_address].lockedCollateral;
+                sellers[_address].lockedCollateral = 0;
             }
 
             availableCollateral_Total += lockedCollateral_Total;
@@ -290,6 +302,7 @@ contract CEXDefaultSwap is DateTime, Ownable, ICreditDefaultSwap {
 
     function setDefaulted(bool _value) external onlyOwner {
         defaulted = _value;
+        execute();
     }
 
     //@TODO-Only to be handled by multisig 
@@ -298,12 +311,11 @@ contract CEXDefaultSwap is DateTime, Ownable, ICreditDefaultSwap {
     }
 
     function unpause() external onlyOwner{
+        require(!defaulted, "Contract has defaulted, use default reset");
+
         paused = false;
         execute();
     }
-
-
-
     
     //@TODO-Only to be handled by multisig 
     function resetAfterDefault(uint256 _newMaturityDate) external onlyOwner {
