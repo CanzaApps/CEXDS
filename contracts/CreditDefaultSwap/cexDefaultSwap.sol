@@ -82,6 +82,8 @@ contract CEXDefaultSwap is DateTime, Ownable, ICreditDefaultSwap {
     }
 
     function deposit(uint256 _amount) external payable {
+
+        execute();
         
         //Don't allow deposits during Pause after default event
         require(!paused,"Contract Paused");
@@ -103,6 +105,9 @@ contract CEXDefaultSwap is DateTime, Ownable, ICreditDefaultSwap {
     }
 
     function withdraw(uint256 _amount) external payable {
+        
+        execute();
+        
         require(
             _amount <= sellers[msg.sender].availableCollateral,
             "Not enough unlocked collateral"
@@ -118,6 +123,9 @@ contract CEXDefaultSwap is DateTime, Ownable, ICreditDefaultSwap {
     }
 
     function purchase(uint256 _amount) external payable {
+        
+        execute();
+
         //N.B. _amount is the amount denominated in collateral being covered. i.e. assuming a premium of 5%, a 100 input in _amount will cover 100 units of collateral and cost the buyer 5 units.
         //This is done to simplify calculations and minimize divisions
 
