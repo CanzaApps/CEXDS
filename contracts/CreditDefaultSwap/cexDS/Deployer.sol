@@ -2,19 +2,29 @@
 pragma solidity ^0.8.18;
 
 import "./CEXDefaultSwap.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/access/AccessControl.sol";
 import "./ICreditDefaultSwap.sol";
 
-import "./ICreditDefaultSwap.sol";
-
-contract Deployer is Ownable {
+contract Deployer is AccessControl {
     CEXDefaultSwap public swapContract;
 
+    bytes32 public constant SUPER_ADMIN = 'SUPER_ADMIN';
+    bytes32 public constant ADMIN_CONTROLLER = 'ADMIN_CONTROLLER';
     address[] public swapList;
     mapping(address => address[]) public userSwaps;
 
     mapping(string => bool) public deployedLoanIDs;
     mapping(string => address) public loans;
+
+    constructor() {
+        _setupRole(SUPER_ADMIN, msg.sender);
+        _setRoleAdmin(ADMIN_CONTROLLER, SUPER_ADMIN);
+    }
+
+    modifier isAdmin(address account) {
+        if(hasRole(ADMIN_CONTROLLER, account) || hasRole(SUPER_ADMIN, account)) revert("Caller does not have any of the admin roles");
+        _;
+    }
 
     function createSwapContract(
         string memory _entityName,
@@ -23,7 +33,8 @@ contract Deployer is Ownable {
         uint256 _initialMaturityDate,
         uint256 _epochDays
 
-    ) public onlyOwner {
+    ) public isAdmin(msg.sender) {
+        
 
         swapContract = new CEXDefaultSwap(
             _entityName,
@@ -43,19 +54,19 @@ contract Deployer is Ownable {
         return swapList;
     }
 
-    function setPoolDefaulted(address _add, bool _val) external onlyOwner {
+    function setPoolDefaulted(address _add, bool _val) external isAdmin(msg.sender) {
         ICreditDefaultSwap(_add).setDefaulted(_val);
     }
 
-    function setPoolPaused(address _add) external onlyOwner{
+    function setPoolPaused(address _add) external isAdmin(msg.sender){
         ICreditDefaultSwap(_add).pause();
     }
 
-    function setPoolUnpaused(address _add) external onlyOwner{
+    function setPoolUnpaused(address _add) external isAdmin(msg.sender){
         ICreditDefaultSwap(_add).unpause();
     }
 
-    function resetPoolAfterDefault(address _add, uint256 _newMaturityDate) external onlyOwner{
+    function resetPoolAfterDefault(address _add, uint256 _newMaturityDate) external isAdmin(msg.sender){
         ICreditDefaultSwap(_add).resetAfterDefault(_newMaturityDate);
     }
 }
