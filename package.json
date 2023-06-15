@@ -1,3 +1,53 @@
 {
-  "name": "hardhat-project"
+  "name": "cds-kontracts",
+  "version": "1.0.0",
+  "description": "Ethereum smart contracts for CexDS",
+  "main": "scripts/deploy.js",
+  "scripts": {
+    "test": "npx hardhat test",
+    "compile": "npx hardhat compile",
+    "prettier": "npx prettier --write '**/*.js' 'contracts/**/*.sol' '**/*.json' '**/*.md'",
+    "prepare": "husky install",
+    "docgen": "npx solidity-docgen --solc-module solc-0.8.4"
+  },
+  "keywords": [
+    "ethereum",
+    "defi"
+  ],
+  "author": "Victor Teixeira",
+  "license": "MIT",
+  "devDependencies": {
+    "@nomiclabs/hardhat-ethers": "^2.2.3",
+    "@nomiclabs/hardhat-etherscan": "^2.1.4",
+    "@nomiclabs/hardhat-solhint": "^2.0.0",
+    "@nomiclabs/hardhat-truffle5": "^2.0.0",
+    "@nomiclabs/hardhat-waffle": "^2.0.1",
+    "@nomiclabs/hardhat-web3": "^2.0.0",
+    "@openzeppelin/hardhat-upgrades": "^1.9.0",
+    "bignumber.js": "^9.0.0",
+    "chai": "^4.3.4",
+    "chai-bignumber": "^3.0.0",
+    "ethereum-waffle": "^3.4.0",
+    "ethers": "^5.4.5",
+    "ganache-cli": "^6.12.2",
+    "hardhat-contract-sizer": "^2.1.1",
+    "hardhat-deploy": "^0.9.8",
+    "hardhat-docgen": "^1.2.0",
+    "hardhat-gas-reporter": "^1.0.4",
+    "hardhat-spdx-license-identifier": "^2.0.3",
+    "prettier": "^1.19.1",
+    "prettier-plugin-solidity": "^1.0.0-beta.10",
+    "solc-0.8.4": "npm:solc@^0.8.4",
+    "solidity-coverage": "^0.7.16",
+    "solidity-docgen": "^0.5.13"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^4.3.2",
+    "@openzeppelin/contracts-upgradeable": "^4.3.2",
+    "base64-sol": "^1.0.1",
+    "dotenv": "^16.0.3"
+  },
+  "lint-staged": {
+    "*.{js,sol,md,json}": "prettier --write"
+  }
 }

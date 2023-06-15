@@ -20,7 +20,6 @@ contract deployer is Ownable {
         string memory _entityName,
         address _currency,
         string memory _currency_name,
-        string memory _status,
         uint256 _premium,
         uint256 _initialMaturityDate,
         uint256 _epochDays
@@ -31,7 +30,6 @@ contract deployer is Ownable {
             _entityName,
             _currency,
             _currency_name,
-            _status,
             _premium,
             _initialMaturityDate,
             _epochDays
@@ -41,9 +39,6 @@ contract deployer is Ownable {
 
         //Add to master list
         swapList.push(contractAddress);
-
-        //Add to list searchable by user
-        userSwaps[msg.sender].push(contractAddress);
     }
 
     function getSwapList() external view returns (address[] memory) {
