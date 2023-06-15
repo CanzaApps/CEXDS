@@ -132,7 +132,7 @@ contract CEXDefaultSwap is Ownable {
         emit Withdraw(msg.sender, _amount);
     }
 
-    function purchase(uint256 _amount) external payable {
+    function purchase(uint256 _amount) external {
         
         execute();
 
@@ -222,9 +222,6 @@ contract CEXDefaultSwap is Ownable {
 
     function claimCollateral() external {
         //@DEV TODO Call Oracle
-
-        //Only trigger if defaulted boolean is true
-        require(defaulted, "Has not defaulted");
 
         uint256 payableAmount = buyers[msg.sender].claimableCollateral;
 
