@@ -7,7 +7,7 @@ import "./ICreditDefaultSwap.sol";
 
 import "./ICreditDefaultSwap.sol";
 
-contract deployer is Ownable {
+contract Deployer is Ownable {
     CEXDefaultSwap public swapContract;
 
     address[] public swapList;
@@ -19,7 +19,6 @@ contract deployer is Ownable {
     function createSwapContract(
         string memory _entityName,
         address _currency,
-        string memory _currency_name,
         uint256 _premium,
         uint256 _initialMaturityDate,
         uint256 _epochDays
@@ -29,7 +28,6 @@ contract deployer is Ownable {
         swapContract = new CEXDefaultSwap(
             _entityName,
             _currency,
-            _currency_name,
             _premium,
             _initialMaturityDate,
             _epochDays

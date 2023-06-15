@@ -3,17 +3,14 @@ pragma solidity ^0.8.18;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "./DateTime.sol";
-import "./ICreditDefaultSwap.sol";
 
-contract CEXDefaultSwap is DateTime, Ownable {
+contract CEXDefaultSwap is Ownable {
 
     //Loan Data
     string public entityName;
-    address public currency;
-    string public currencyName;
+    // Ensures a valid ERC20 compliant address is passed in constructor
+    IERC20 public currency;
     bool public defaulted;
-    string public entityURL;
 
     //Epoch variables
     uint256 public epoch;
@@ -75,14 +72,14 @@ contract CEXDefaultSwap is DateTime, Ownable {
     constructor(
         string memory _entityName,
         address _currency,
-        string memory _currency_name,
         uint256 _premium,
         uint256 _initialMaturityDate,
         uint256 _epochDays
     ) {
+        require(_initialMaturityDate > block.timestamp, "Invalid Maturity Date set");
+        require(_premium < 10000, "Premium can not be 100%");
+        currency = IERC20(_currency);
         entityName = _entityName;
-        currency = _currency;
-        currencyName = _currency_name;
         premium = _premium;
         maturityDate = _initialMaturityDate;
         epochDays = _epochDays;
@@ -229,9 +226,6 @@ contract CEXDefaultSwap is DateTime, Ownable {
         //Only trigger if defaulted boolean is true
         require(defaulted, "Has not defaulted");
 
-        // To update buyer's claimable collateral
-        execute();
-
         uint256 payableAmount = buyers[msg.sender].claimableCollateral;
 
         buyers[msg.sender].claimableCollateral = 0;
@@ -320,8 +314,9 @@ contract CEXDefaultSwap is DateTime, Ownable {
 
     }
 
-    function setDefaulted(bool _value) external onlyOwner {
-        defaulted = _value;
+    function setDefaulted() external onlyOwner {
+        require(!defaulted, "Contract already defaulted");
+        defaulted = true;
         execute();
     }
 
@@ -359,7 +354,7 @@ contract CEXDefaultSwap is DateTime, Ownable {
 
     function _transferFrom(uint256 _amount) internal {
 
-        bool transferSuccess = IERC20(currency).transferFrom(
+        bool transferSuccess = currency.transferFrom(
             msg.sender,
             address(this),
             _amount
@@ -369,7 +364,7 @@ contract CEXDefaultSwap is DateTime, Ownable {
     }
 
     function _transferTo(uint256 _amount, address _user) internal {
-        bool transferSuccess = IERC20(currency).transfer(_user, _amount);
+        bool transferSuccess = currency.transfer(_user, _amount);
 
         if (!transferSuccess) revert();
     }
