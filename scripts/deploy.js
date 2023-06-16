@@ -17,6 +17,11 @@ async function main() {
 
   console.log("CEX Deployer deployed to ", cexDeployer.address);
 
+  const superAdmin = await cexDeployer.SUPER_ADMIN();
+  const doIhaverole = await cexDeployer.hasRole(superAdmin, signer.address);
+
+  console.log({ superAdmin, doIhaverole })
+
   const tx = await cexDeployer.createSwapContract("SampleEntity", "0x874069Fa1Eb16D44d622F2e0Ca25eeA172369bC1", "1000", "1686947188", 3);
 
   await tx.wait();

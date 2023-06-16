@@ -21,8 +21,8 @@ contract Deployer is AccessControl {
         _setRoleAdmin(ADMIN_CONTROLLER, SUPER_ADMIN);
     }
 
-    modifier isAdmin(address account) {
-        if(hasRole(ADMIN_CONTROLLER, account) || hasRole(SUPER_ADMIN, account)) revert("Caller does not have any of the admin roles");
+    modifier isAdmin() {
+        if(!hasRole(ADMIN_CONTROLLER, msg.sender) && !hasRole(SUPER_ADMIN, msg.sender)) revert("Caller does not have any of the admin roles");
         _;
     }
 
@@ -33,7 +33,7 @@ contract Deployer is AccessControl {
         uint256 _initialMaturityDate,
         uint256 _epochDays
 
-    ) public isAdmin(msg.sender) {
+    ) public isAdmin {
         
 
         swapContract = new CEXDefaultSwap(
@@ -54,19 +54,19 @@ contract Deployer is AccessControl {
         return swapList;
     }
 
-    function setPoolDefaulted(address _add, bool _val) external isAdmin(msg.sender) {
+    function setPoolDefaulted(address _add, bool _val) external isAdmin {
         ICreditDefaultSwap(_add).setDefaulted(_val);
     }
 
-    function setPoolPaused(address _add) external isAdmin(msg.sender){
+    function setPoolPaused(address _add) external isAdmin {
         ICreditDefaultSwap(_add).pause();
     }
 
-    function setPoolUnpaused(address _add) external isAdmin(msg.sender){
+    function setPoolUnpaused(address _add) external isAdmin {
         ICreditDefaultSwap(_add).unpause();
     }
 
-    function resetPoolAfterDefault(address _add, uint256 _newMaturityDate) external isAdmin(msg.sender){
+    function resetPoolAfterDefault(address _add, uint256 _newMaturityDate) external isAdmin {
         ICreditDefaultSwap(_add).resetAfterDefault(_newMaturityDate);
     }
 }
