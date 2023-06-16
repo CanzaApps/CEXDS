@@ -57,8 +57,7 @@ contract CEXDefaultSwap is Ownable {
     uint256 public makerFee = 30;
 
     //Treasury Address
-    //@TODO CHANGE TO DEPLOYER CONTRACT
-    address treasuryAddress = 0xAb8483F64d9C6d1EcF9b849Ae677dD3315835cb2;
+    address treasuryAddress;
 
     //Pause boolean (for after default event)
     bool paused;
@@ -77,12 +76,13 @@ contract CEXDefaultSwap is Ownable {
         uint256 _epochDays
     ) {
         require(_initialMaturityDate > block.timestamp, "Invalid Maturity Date set");
-        require(_premium < 10000, "Premium can not be 100%");
+        require(_premium < 10000, "Premium can not be 100% or above");
         currency = IERC20(_currency);
         entityName = _entityName;
         premium = _premium;
         maturityDate = _initialMaturityDate;
         epochDays = _epochDays;
+        treasuryAddress = msg.sender;
 
     }
 
