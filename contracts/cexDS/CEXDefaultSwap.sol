@@ -81,15 +81,13 @@ contract CEXDefaultSwap is DateTime, Ownable, ICreditDefaultSwap {
         premium = _premium;
         maturityDate = _initialMaturityDate;
         epochDays = _epochDays;
-
     }
 
     function deposit(uint256 _amount) external payable {
-
         execute();
-        
+
         //Don't allow deposits during Pause after default event
-        require(!paused,"Contract Paused");
+        require(!paused, "Contract Paused");
 
         //@DEV-TODO Include transfer from logic when ready with below
 
@@ -108,12 +106,11 @@ contract CEXDefaultSwap is DateTime, Ownable, ICreditDefaultSwap {
     }
 
     function withdraw(uint256 _amount) external payable {
-        
         //Ensures execute happens before withdraw happens if pause event not active
-        if(!paused){
+        if (!paused) {
             execute();
         }
-        
+
         require(
             _amount <= sellers[msg.sender].availableCollateral,
             "Not enough unlocked collateral"
@@ -129,7 +126,6 @@ contract CEXDefaultSwap is DateTime, Ownable, ICreditDefaultSwap {
     }
 
     function purchase(uint256 _amount) external payable {
-        
         execute();
 
         //N.B. _amount is the amount denominated in collateral being covered. i.e. assuming a premium of 5%, a 100 input in _amount will cover 100 units of collateral and cost the buyer 5 units.
@@ -139,12 +135,12 @@ contract CEXDefaultSwap is DateTime, Ownable, ICreditDefaultSwap {
         require(_amount <= availableCollateral_Total, "Not enough to sell");
 
         //Don't allow deposits during Pause after default event
-        require(!paused,"Contract Paused");
+        require(!paused, "Contract Paused");
 
         //@DEV-TODO does this need to be dyanmic for different dates?
-        
+
         uint256 makerFeePayable = (_amount * makerFee) / 10000;
-        
+
         uint256 premiumPayable = (_amount * premium) / 10000;
 
         uint256 totalPayable = makerFeePayable + premiumPayable;
@@ -202,7 +198,7 @@ contract CEXDefaultSwap is DateTime, Ownable, ICreditDefaultSwap {
 
     function claimPremium() external {
         //Ensures execute happens before claim happens if pause event not active
-        if(!paused){
+        if (!paused) {
             execute();
         }
 
@@ -226,7 +222,6 @@ contract CEXDefaultSwap is DateTime, Ownable, ICreditDefaultSwap {
         _transferTo(payableAmount, msg.sender);
 
         buyers[msg.sender].claimableCollateral = 0;
-
     }
 
     function execute() internal {
@@ -240,12 +235,11 @@ contract CEXDefaultSwap is DateTime, Ownable, ICreditDefaultSwap {
         if (defaulted) {
             //Handle buyer adjustments for default
             //buyers can now claim their covered collateral
-            //Collateral Covered set to 0 
-
+            //Collateral Covered set to 0
 
             for (uint256 i = 0; i < buyerList.length; i++) {
                 address _address = buyerList[i];
-            
+
                 buyers[_address].claimableCollateral = buyers[_address]
                     .collateralCovered;
                 buyers[_address].collateralCovered = 0;
@@ -261,22 +255,21 @@ contract CEXDefaultSwap is DateTime, Ownable, ICreditDefaultSwap {
             //user can still withdraw even when paused.
             for (uint256 i = 0; i < sellerList.length; i++) {
                 address _address = sellerList[i];
-                sellers[_address].depositedCollateral -= sellers[_address].lockedCollateral; 
+                sellers[_address].depositedCollateral -= sellers[_address]
+                    .lockedCollateral;
                 sellers[_address].lockedCollateral = 0;
             }
 
             depositedCollateral_Total -= lockedCollateral_Total;
             lockedCollateral_Total = 0;
-            
+
             //Pauses contract until reset
             paused = true;
             status = "Defaulted";
-
         } else if (matured) {
-
             //Handle buyer adjustments for maturity
             //Covered collateral reset to 0
-            //Premium paid reset to 0 
+            //Premium paid reset to 0
             for (uint256 i = 0; i < buyerList.length; i++) {
                 address _address = buyerList[i];
                 buyers[_address].collateralCovered = 0;
@@ -291,8 +284,8 @@ contract CEXDefaultSwap is DateTime, Ownable, ICreditDefaultSwap {
             //Automatically rolled over
             for (uint256 i = 0; i < sellerList.length; i++) {
                 address _address = sellerList[i];
-                sellers[_address].availableCollateral += 
-                   sellers[_address].lockedCollateral;
+                sellers[_address].availableCollateral += sellers[_address]
+                    .lockedCollateral;
                 sellers[_address].lockedCollateral = 0;
             }
 
@@ -301,11 +294,10 @@ contract CEXDefaultSwap is DateTime, Ownable, ICreditDefaultSwap {
 
             uint256 x = epochDays * 86400;
 
-            maturityDate += x; 
+            maturityDate += x;
 
             rollEpoch(maturityDate);
         }
-
     }
 
     function setDefaulted(bool _value) external onlyOwner {
@@ -313,40 +305,35 @@ contract CEXDefaultSwap is DateTime, Ownable, ICreditDefaultSwap {
         execute();
     }
 
-    //@TODO-Only to be handled by multisig 
+    //@TODO-Only to be handled by multisig
     function pause() external onlyOwner {
         paused = true;
         status = "Paused";
     }
 
-    function unpause() external onlyOwner{
+    function unpause() external onlyOwner {
         require(!defaulted, "Contract has defaulted, use default reset");
 
         paused = false;
         status = "Active";
         execute();
     }
-    
-    //@TODO-Only to be handled by multisig 
+
+    //@TODO-Only to be handled by multisig
     function resetAfterDefault(uint256 _newMaturityDate) external onlyOwner {
-        
         require(defaulted, "Not defaulted");
 
         defaulted = false;
         paused = false;
         status = "Active";
         rollEpoch(_newMaturityDate);
-
     }
-    
+
     //Epoch Vairable Handlers
     function rollEpoch(uint256 _newMaturityDate) internal {
-
         maturityDate = _newMaturityDate;
-        epoch ++;
-
+        epoch++;
     }
-    
 
     function _transferFrom(uint256 _amount) internal {
         require(
@@ -368,5 +355,4 @@ contract CEXDefaultSwap is DateTime, Ownable, ICreditDefaultSwap {
 
         if (!transferSuccess) revert();
     }
-
 }

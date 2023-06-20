@@ -24,9 +24,7 @@ contract deployer is Ownable {
         uint256 _premium,
         uint256 _initialMaturityDate,
         uint256 _epochDays
-
     ) public onlyOwner {
-
         swapContract = new CEXDefaultSwap(
             _entityName,
             _currency,
@@ -54,15 +52,18 @@ contract deployer is Ownable {
         ICreditDefaultSwap(_add).setDefaulted(_val);
     }
 
-    function setPoolPaused(address _add) external onlyOwner{
+    function setPoolPaused(address _add) external onlyOwner {
         ICreditDefaultSwap(_add).pause();
     }
 
-    function setPoolUnpaused(address _add) external onlyOwner{
+    function setPoolUnpaused(address _add) external onlyOwner {
         ICreditDefaultSwap(_add).unpause();
     }
 
-    function resetPoolAfterDefault(address _add, uint256 _newMaturityDate) external onlyOwner{
+    function resetPoolAfterDefault(
+        address _add,
+        uint256 _newMaturityDate
+    ) external onlyOwner {
         ICreditDefaultSwap(_add).resetAfterDefault(_newMaturityDate);
     }
 }
