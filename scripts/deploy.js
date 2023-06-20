@@ -22,9 +22,11 @@ async function main() {
 
   console.log({ superAdmin, doIhaverole })
 
-  const tx = await cexDeployer.createSwapContract("SampleEntity", "0x874069Fa1Eb16D44d622F2e0Ca25eeA172369bC1", "1000", "1686947188", 3);
+  const tx = await cexDeployer.createSwapContract("SampleEntity", "0x1d80b14fc72d953eDfD87bF4d6Acd08547E3f1F6", "1000", "1687119988", 3);
 
   await tx.wait();
+
+  // await cexDeployer.grantRole(superAdmin, "0xBc61e22271fbf9f6840911a49588C95c1225cD56");
 
   console.log("Swap Contracts are now", await cexDeployer.getSwapList());
 

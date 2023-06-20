@@ -59,6 +59,11 @@ const config = {
       accounts: process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
       chainId: 42220
     },
+    fuji: {
+      url: "https://api.avax-test.network/ext/bc/C/rpc",
+      accounts: process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
+      chainId: 43113
+    },
     hardhat: {
       /*forking: {
         url:
@@ -113,9 +118,9 @@ const config = {
   spdxLicenseIdentifier: {
     runOnCompile: true
   },
-  // etherscan: {
-  //   apiKey: secret.apiKey
-  // },
+  etherscan: {
+    apiKey: process.env.CELOSCAN_KEY
+  },
   gasReporter: {
     currency: "USD",
     coinmarketcap: "b0c64afd-6aca-4201-8779-db8dc03e9793"
