@@ -35,7 +35,7 @@ const config = {
     }
   },
   paths: {
-    sources: "./contracts/CreditDefaultSwap/cexDS"
+    sources: "./contracts/cexDS"
   },
   networks: {
     mainnet: {
