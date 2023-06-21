@@ -48,7 +48,6 @@ contract CEXDefaultSwap is Ownable {
     uint256 public lockedCollateral_Total;
     uint256 public premiumPaid_Total;
     uint256 public unclaimedPremium_Total;
-    //@DEV-TODO difference btw this and lockedCollateral_Total?
     uint256 public collateralCovered_Total;
     uint256 public claimableCollateral_Total;
 

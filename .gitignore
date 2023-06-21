@@ -4,7 +4,10 @@ coverage
 coverage.json
 typechain
 typechain-types
+<<<<<<< HEAD
 yarn-error.log
+=======
+>>>>>>> 1e984bb6b1033a390c90bef1b8a603ef77fa27df
 
 # Hardhat files
 cache
