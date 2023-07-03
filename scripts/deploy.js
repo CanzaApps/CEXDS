@@ -10,7 +10,7 @@ async function main() {
 
   const signer = await hre.ethers.getSigner();
 
-  const CEXDeployer = await hre.ethers.getContractFactory("Deployer");
+  const CEXDeployer = await hre.ethers.getContractFactory("SwapController");
   const cexDeployer = await CEXDeployer.deploy();
 
   await cexDeployer.deployed();

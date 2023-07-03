@@ -3,6 +3,7 @@ pragma solidity ^0.8.18;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
+import "./interfaces/ISwapController.sol";
 
 contract CEXDefaultSwap is Ownable {
 
@@ -55,9 +56,6 @@ contract CEXDefaultSwap is Ownable {
     uint256 public premium;
     uint256 public makerFee = 30;
 
-    //Treasury Address
-    address treasuryAddress;
-
     //Pause boolean (for after default event)
     bool paused;
 
@@ -81,7 +79,6 @@ contract CEXDefaultSwap is Ownable {
         premium = _premium;
         maturityDate = _initialMaturityDate;
         epochDays = _epochDays;
-        treasuryAddress = msg.sender;
 
     }
 
@@ -153,7 +150,8 @@ contract CEXDefaultSwap is Ownable {
         uint256 totalPayable = makerFeePayable + premiumPayable;
 
         _transferFrom(totalPayable);
-        _transferTo(makerFeePayable, treasuryAddress);
+        currency.approve(owner(), makerFeePayable);
+        ISwapController(owner()).payFees(makerFeePayable);
 
         buyers[msg.sender].premiumPaid += premiumPayable;
         buyers[msg.sender].collateralCovered += _amount;

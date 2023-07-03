@@ -2,7 +2,7 @@
 pragma solidity ^0.8.18;
 
 interface ICreditDefaultSwap {
-    function setDefaulted(bool _value) external;
+    function setDefaulted() external;
 
     function resetAfterDefault(uint256 _newMaturityDate) external;
 
