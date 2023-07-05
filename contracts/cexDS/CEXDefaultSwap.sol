@@ -3,15 +3,18 @@ pragma solidity ^0.8.18;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "./interfaces/ISwapController.sol";
+import "./Voting.sol";
 
-contract CEXDefaultSwap is Ownable {
+contract CEXDefaultSwap {
 
     //Loan Data
     string public entityName;
     // Ensures a valid ERC20 compliant address is passed in constructor
     IERC20 public currency;
     bool public defaulted;
+    address public votingContract;
+    address public controller;
+    uint256 public totalVoterFeePaid;
 
     //Epoch variables
     uint256 public epoch;
@@ -70,7 +73,8 @@ contract CEXDefaultSwap is Ownable {
         address _currency,
         uint256 _premium,
         uint256 _initialMaturityDate,
-        uint256 _epochDays
+        uint256 _epochDays,
+        address _votingContract
     ) {
         require(_initialMaturityDate > block.timestamp, "Invalid Maturity Date set");
         require(_premium < 10000, "Premium can not be 100% or above");
@@ -79,7 +83,13 @@ contract CEXDefaultSwap is Ownable {
         premium = _premium;
         maturityDate = _initialMaturityDate;
         epochDays = _epochDays;
+        votingContract = _votingContract;
+        controller = msg.sender;
+    }
 
+    modifier validCaller {
+        if(msg.sender != controller && msg.sender != votingContract) revert("Unauthorized");
+        _;
     }
 
     function deposit(uint256 _amount) external {
@@ -150,8 +160,11 @@ contract CEXDefaultSwap is Ownable {
         uint256 totalPayable = makerFeePayable + premiumPayable;
 
         _transferFrom(totalPayable);
-        currency.approve(owner(), makerFeePayable);
-        ISwapController(owner()).payFees(makerFeePayable);
+        uint256 voterFeeRate = Voting(votingContract).PERCENTAGE_VOTERS_DEFAULT_FEE();
+        uint256 voterFee = (makerFeePayable * voterFeeRate)/10000;
+        _transferTo(voterFee, votingContract);
+        _transferTo(makerFeePayable - voterFee, controller);
+        totalVoterFeePaid += voterFee;
 
         buyers[msg.sender].premiumPaid += premiumPayable;
         buyers[msg.sender].collateralCovered += _amount;
@@ -308,18 +321,23 @@ contract CEXDefaultSwap is Ownable {
 
     }
 
-    function setDefaulted() external onlyOwner {
+    function deductFromVoterFee(uint256 _amount) external validCaller {
+        if (_amount > totalVoterFeePaid) revert("Not sufficient deductible");
+        totalVoterFeePaid -= _amount;
+    }
+
+    function setDefaulted() external validCaller {
         require(!defaulted, "Contract already defaulted");
         defaulted = true;
         execute();
     }
 
     //@TODO-Only to be handled by multisig 
-    function pause() external onlyOwner {
+    function pause() external validCaller {
         paused = true;
     }
 
-    function unpause() external onlyOwner{
+    function unpause() external validCaller {
         require(!defaulted, "Contract has defaulted, use default reset");
 
         paused = false;
@@ -327,8 +345,8 @@ contract CEXDefaultSwap is Ownable {
     }
     
     //@TODO-Only to be handled by multisig 
-    function resetAfterDefault(uint256 _newMaturityDate) external onlyOwner {
-        
+    function resetAfterDefault(uint256 _newMaturityDate) external {
+        require(msg.sender == controller, "Unauthorized");
         require(defaulted, "Not defaulted");
 
         defaulted = false;

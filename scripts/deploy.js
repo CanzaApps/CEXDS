@@ -9,9 +9,10 @@ const hre = require("hardhat");
 async function main() {
 
   const signer = await hre.ethers.getSigner();
+  const secondAdmin = "0x1d80b14fc72d953eDfD87bF4d6Acd08547E3f1F6";
 
   const CEXDeployer = await hre.ethers.getContractFactory("SwapController");
-  const cexDeployer = await CEXDeployer.deploy();
+  const cexDeployer = await CEXDeployer.deploy(secondAdmin);
 
   await cexDeployer.deployed();
 
@@ -22,7 +23,19 @@ async function main() {
 
   console.log({ superAdmin, doIhaverole })
 
-  const tx = await cexDeployer.createSwapContract("SampleEntity", "0x1d80b14fc72d953eDfD87bF4d6Acd08547E3f1F6", "1000", "1687119988", 3);
+  const Voting = await hre.ethers.getContractFactory("Voting");
+  const voting = await Voting.deploy(secondAdmin, cexDeployer.address);
+
+  await voting.deployed();
+  console.log("Voting deployed to ", voting.address);
+
+  // Add Voting Contract to controller
+  const trx = await cexDeployer.setVotingContract(voting.address);
+  await trx.wait();
+
+  const poolMatureTime = Math.round(Date.now()/1000) + (2*86400);
+
+  const tx = await cexDeployer.createSwapContract("SampleEntity", "0x1d80b14fc72d953eDfD87bF4d6Acd08547E3f1F6", poolMatureTime.toString(), "1687119988", 3);
 
   await tx.wait();
 

@@ -6,6 +6,7 @@
   "scripts": {
     "test": "npx hardhat test",
     "compile": "npx hardhat compile",
+    "deploy": "npx hardhat run scripts/deploy.js",
     "prettier": "npx prettier --write '**/*.js' 'contracts/**/*.sol' '**/*.json' '**/*.md'",
     "prepare": "husky install",
     "docgen": "npx solidity-docgen --solc-module solc-0.8.4"
