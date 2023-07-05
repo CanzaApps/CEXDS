@@ -26,7 +26,7 @@ pragma solidity >=0.6.0 <0.9.0;
 // Enjoy. (c) BokkyPooBah / Bok Consulting Pty Ltd 2018-2019. The MIT Licence.
 // ----------------------------------------------------------------------------
 
-contract DateTime {
+abstract contract DateTime {
     uint constant SECONDS_PER_DAY = 24 * 60 * 60;
     uint constant SECONDS_PER_HOUR = 60 * 60;
     uint constant SECONDS_PER_MINUTE = 60;

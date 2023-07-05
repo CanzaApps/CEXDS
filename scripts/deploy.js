@@ -7,22 +7,29 @@
 const hre = require("hardhat");
 
 async function main() {
-  const currentTimestampInSeconds = Math.round(Date.now() / 1000);
-  const unlockTime = currentTimestampInSeconds + 60;
 
-  const lockedAmount = hre.ethers.parseEther("0.001");
+  const signer = await hre.ethers.getSigner();
 
-  const lock = await hre.ethers.deployContract("Lock", [unlockTime], {
-    value: lockedAmount,
-  });
+  const CEXDeployer = await hre.ethers.getContractFactory("SwapController");
+  const cexDeployer = await CEXDeployer.deploy();
 
-  await lock.waitForDeployment();
+  await cexDeployer.deployed();
 
-  console.log(
-    `Lock with ${ethers.formatEther(
-      lockedAmount
-    )}ETH and unlock timestamp ${unlockTime} deployed to ${lock.target}`
-  );
+  console.log("CEX Deployer deployed to ", cexDeployer.address);
+
+  const superAdmin = await cexDeployer.SUPER_ADMIN();
+  const doIhaverole = await cexDeployer.hasRole(superAdmin, signer.address);
+
+  console.log({ superAdmin, doIhaverole })
+
+  const tx = await cexDeployer.createSwapContract("SampleEntity", "0x1d80b14fc72d953eDfD87bF4d6Acd08547E3f1F6", "1000", "1687119988", 3);
+
+  await tx.wait();
+
+  // await cexDeployer.grantRole(superAdmin, "0xBc61e22271fbf9f6840911a49588C95c1225cD56");
+
+  console.log("Swap Contracts are now", await cexDeployer.getSwapList());
+
 }
 
 // We recommend this pattern to be able to use async/await everywhere
