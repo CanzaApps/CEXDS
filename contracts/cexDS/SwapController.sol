@@ -27,6 +27,13 @@ contract SwapController is AccessControl {
         _;
     }
 
+    /**
+     * @notice Initializes a Swap Contract for a specified entity.
+     * @param _entityName Human readable name for the entity
+     * @param _currency Token address, for which loan was taken in the specified entity. Token must implement the ERC-20 standard.
+     * @param _premium Premium percentage desired for credit swap pool.
+     * @param _initialMaturityDate Date for pool maturity.
+     */
     function createSwapContract(
         string memory _entityName,
         address _currency,
