@@ -7,6 +7,11 @@ import "@openzeppelin/contracts/access/AccessControl.sol";
 import "./interfaces/ICreditDefaultSwap.sol";
 import "./interfaces/ISwapController.sol";
 
+/**
+* @title CXDX Multi-sig Voter Contract
+*
+* @author Ebube
+*/
 contract Voting is AccessControl {
     bytes32 public constant SUPER_ADMIN = 'SUPER_ADMIN';
     bytes32 public constant VOTER_ROLE = 'VOTER_ROLE';
@@ -53,6 +58,12 @@ contract Voting is AccessControl {
         controller = controllerAddress;
     }
 
+    /**
+     * @notice Pay a percentage of accumulated voter fees to each individual voter. Can only be called by address with SUPER_ADMIN role.
+     * Percentage is defined as `PERCENTAGE_VOTERS_RECURRING_FEE`, and interval must have passed `VOTER_RECURRING_PAYMENT_INTERVAL` after last payment.
+     * @return pools Array containing the list of swap pools from which payment were made. Should naturally contain all pools
+     * @return amountsPaidOut Array of amounts paid with indices matching index of pool in pools array from which amount was paid
+     */
     function payRecurringVoterFees() 
         external 
         onlyRole(SUPER_ADMIN) 
@@ -81,6 +92,12 @@ contract Voting is AccessControl {
         emit PayVoters(pools, amountsPaidOut);
     }
 
+    /**
+     * @notice Vote for default of a contract. Can only be called by address with VOTER_ROLE role.
+     * Would call `executeFinalVote` to pay out benefits to the voters after the seventh vote is placed.
+     * @param _poolAddress address of pool on which vote is being cast
+     * @param choice Boolean indicated a 'Yes' or 'No' vote on the swap pool
+     */
     function vote(
         address _poolAddress
         , bool choice
@@ -109,6 +126,10 @@ contract Voting is AccessControl {
         emit Vote(_poolAddress, msg.sender, choice, votesForPool.length);
     }
 
+    /**
+     * @notice grant VOTER_ROLE role to voters to enable them engage in voting process. Must revert when `NUMBER_OF_VOTERS_EXPECTED` is reached.
+     * @param voters List of voters to add to the contract
+     */
     function whiteListVoters(
         address[] memory voters
         ) external 
@@ -124,6 +145,11 @@ contract Voting is AccessControl {
         }
     }
 
+    /**
+     * @notice Replace a voter with another since number of voters must always be maintained when a voter is to be removed.
+     * @param oldVoter Voter address to be removed
+     * @param replacement Voter replacement address
+     */
     function replaceVoter(
         address oldVoter
         , address replacement
@@ -135,6 +161,10 @@ contract Voting is AccessControl {
 
     }
 
+    /**
+     * @notice Set interval for paying `PERCENTAGE_VOTERS_RECURRING_FEE` to voters.
+     * @param _newInterval New time frequency for paying reward.
+     */
     function setVoterRecurringPaymentInterval(
         uint256 _newInterval
         ) external 
@@ -142,6 +172,10 @@ contract Voting is AccessControl {
         VOTER_RECURRING_PAYMENT_INTERVAL = _newInterval;
     }
 
+    /**
+     * @notice Set percentage fee to be paid to voters at the specified interval
+     * @param _newValue New fee percentage to be paid.
+     */
     function setPercentageVoterRecurringFee(
         uint256 _newValue
         ) external 
@@ -149,6 +183,10 @@ contract Voting is AccessControl {
         PERCENTAGE_VOTERS_RECURRING_FEE = _newValue;
     }
 
+    /**
+     * @notice Set percentage of total pool fee to be accumulated for maker fee paid into the pool contracts.
+     * @param _newValue New value for the fee.
+     */
     function setPercentageVoterDefaultFee(
         uint256 _newValue
         ) external 
@@ -160,7 +198,7 @@ contract Voting is AccessControl {
     // Internals
 
     // Handles implementation for the 7th vote of a particular cycle of votes
-    function _executeFinalVote(address _poolAddress) internal {
+    function _executeFinalVote(address _poolAddress) private {
         VoterData[] memory votesForPool = poolVotes[_poolAddress];
 
         uint8 i = 0;
