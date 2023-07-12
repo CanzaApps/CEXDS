@@ -6,6 +6,7 @@ import "./SwapController.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "./interfaces/ICreditDefaultSwap.sol";
 import "./interfaces/ISwapController.sol";
+import "hardhat/console.sol";
 
 /**
 * @title CXDX Multi-sig Voter Contract
@@ -32,8 +33,8 @@ contract Voting is AccessControl {
     uint8 public immutable NUMBER_OF_VOTERS_EXPECTED;
 
     mapping(address => VoterData[]) public poolVotes;
-    mapping(address => uint8) private trueVoteCount;
-    mapping(address => bool) votingState;
+    mapping(address => uint8) public trueVoteCount;
+    mapping(address => bool) public votingState;
     mapping(address => mapping(address => bool)) public voterHasVoted;
     mapping(address => uint256) public poolFees;
 
@@ -103,7 +104,7 @@ contract Voting is AccessControl {
         , bool choice
         ) external 
         onlyRole(VOTER_ROLE) {
-
+        console.log("Vote: ", voterHasVoted[_poolAddress][msg.sender]);
         require(!voterHasVoted[_poolAddress][msg.sender], "Already voted in the current cycle");
 
         VoterData memory voterInfo = VoterData(msg.sender, choice);
@@ -240,6 +241,7 @@ contract Voting is AccessControl {
             if (voters[i] == _voter) reachedVoter = true;
 
             if (reachedVoter) voters[i] = voters[voters.length - 1];
+            i++;
         }
         voterList = voters;
         voterList.pop();
