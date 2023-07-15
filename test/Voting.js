@@ -6,6 +6,7 @@ const {
 const { expect } = require("chai");
 const BigNumber = require("bignumber.js");
 const { ethers, assert, network } = require("hardhat");
+const fs = require('fs');
 
 const PREMIUM = 0.1; // Fractional premium
 const INIT_EPOCH = 2;
@@ -25,7 +26,6 @@ describe("Voting", function() {
     before(async function() {
 
         [acc0, acc1, acc2, acc3, acc4, acc5, acc6, acc7, acc8, acc9, acc10] = await ethers.getSigners();
-        console.log((await ethers.getSigners()).length)
         controller = await (await (await ethers.getContractFactory("SwapController")).deploy(acc1.address)).deployed();
         contract = await (await (await ethers.getContractFactory("Voting")).deploy(acc1.address, controller.address)).deployed();
         poolToken = await (await (await ethers.getContractFactory("ERC20Mock")).deploy()).deployed();
@@ -70,7 +70,6 @@ describe("Voting", function() {
                     expect(await contract.hasRole(voterRole, add)).to.equal(true);
                 })
                 snapshotId = await network.provider.send('evm_snapshot');
-                console.log(snapshotId)
             })
         })
 
@@ -140,12 +139,10 @@ describe("Voting", function() {
                 const voterRole = await contract.VOTER_ROLE();
                 const previousAcc9Role = await contract.hasRole(voterRole, acc9.address);
                 const previousAcc8Role = await contract.hasRole(voterRole, acc8.address);
-                console.log("Here")
                 //acc9 already a voter. Replace with acc8
                 const tx = await contract.replaceVoter(acc9.address, acc8.address);
                 await tx.wait();
 
-                console.log("Here too")
 
                 const finalAcc9Role = await contract.hasRole(voterRole, acc9.address);
                 const finalAcc8Role = await contract.hasRole(voterRole, acc8.address);
@@ -218,34 +215,40 @@ describe("Voting", function() {
     })
 
     describe("vote", function() {
-        const voterAccs = [acc2, acc3, acc4, acc5, acc6, acc7, acc8];
+        let voterAccs;
+        let poolContract;
+        let voterTokenBalances = [];
 
         before(async () => {
+            voterAccs = [acc2, acc3, acc4, acc5, acc6, acc7, acc8];
 
-            const tx = await contract.whiteList
+            await network.provider.send('evm_revert', [snapshotId]);
+
+            await poolToken.mint(acc9.address, ethers.utils.parseEther('100'));
+            await poolToken.mint(acc10.address, ethers.utils.parseEther('100'));
+
+            await poolToken.connect(acc9).approve(poolAddress, ethers.utils.parseEther('50'));
+            await poolToken.connect(acc10).approve(poolAddress, ethers.utils.parseEther('50'));
+
+            poolContract = await ethers.getContractAt("CEXDefaultSwap", poolAddress);
+            await poolContract.connect(acc9).deposit(ethers.utils.parseEther('50'));
+            await poolContract.connect(acc10).purchase(ethers.utils.parseEther('20'));
         })
         context("Happy path", function() {
 
-            it("Should emit Vote event", async () => {
-
-                const tx = contract.connect(acc3).vote(poolAddress, true);
-
-                await expect(tx).to.emit(contract, "Vote").withArgs(poolAddress, acc3.address, true, 1);
-            })
-
-            it("Should allow user vote and update vote data", async () => {
+            it("Should allow user vote, update vote data and emit vote event", async () => {
                 await network.provider.send('evm_revert', [snapshotId]);
-                console.log(await contract.voterHasVoted(poolAddress, acc3.address))
 
-                const tx = await contract.connect(acc3).vote(poolAddress, true);
-
+                const tx = contract.connect(acc2).vote(poolAddress, true);
+                voterTokenBalances.push((await poolToken.balanceOf(acc2.address)).toString());
                 // await tx.wait();
 
-                const vote = await contract.poolVotes(poolAddress, 0)
+                await expect(tx).to.emit(contract, "Vote").withArgs(poolAddress, acc2.address, true, 1);
 
-                expect(vote.voter).to.equal(acc3.address);
+                const vote = await contract.poolVotes(poolAddress, 0)
+                expect(vote.voter).to.equal(acc2.address);
                 expect(vote.choice).to.equal(true);
-                expect(await contract.voterHasVoted(poolAddress, acc3.address)).to.equal(true);
+                expect(await contract.voterHasVoted(poolAddress, acc2.address)).to.equal(true);
                 expect(await contract.trueVoteCount(poolAddress)).to.equal(1);
                 expect(await contract.votingState(poolAddress)).to.equal(false);
 
@@ -254,102 +257,92 @@ describe("Voting", function() {
             it("Should set voting state to true and pause pool contract upon second vote", async () => {
                 const poolContract = await ethers.getContractAt("CEXDefaultSwap", poolAddress)
                 const poolPreviouslyPaused = await poolContract.isPaused();
-                const tx = await contract.connect(acc4).vote(poolAddress, true);
+                const tx = await contract.connect(acc3).vote(poolAddress, true);
+                voterTokenBalances.push((await poolToken.balanceOf(acc3.address)).toString());
 
                 await tx.wait();
                 const vote = await contract.poolVotes(poolAddress, 1)
-
-                expect(vote.voter).to.equal(acc4.address);
+                
+                expect(vote.voter).to.equal(acc3.address);
                 expect(vote.choice).to.equal(true);
-                expect(await contract.votingState(poolAddress)).to.equal(false);
+                expect(await contract.votingState(poolAddress)).to.equal(true);
                 expect(await poolContract.isPaused()).to.be.true;
                 expect((await poolContract.isPaused()) && poolPreviouslyPaused).to.be.false;
             })
 
             it("Should execute the final vote and pay all fees to the voters in rational majority and set defaulted if rational majority voted true", async () => {
-
-                await network.provider.send('evm_revert', [snapshotId]);
-
-                await poolToken.mint(acc9.address, ethers.utils.parseEther('100'));
-                await poolToken.mint(acc10.address, ethers.utils.parseEther('100'));
-
-                await poolToken.connect(acc9).approve(poolAddress, ethers.utils.parseEther('50'));
-                await poolToken.connect(acc10).approve(poolAddress, ethers.utils.parseEther('50'));
-
-                const poolContract = await ethers.getContractAt("CEXDefaultSwap", poolAddress);
-
-                await poolContract.connect(acc9).deposit(ethers.utils.parseEther('50'));
-                await poolContract.connect(acc10).purchase(ethers.utils.parseEther('20'));
-
                 const voterFeePaid = await poolContract.totalVoterFeePaid();
                 const votersExpected = await contract.NUMBER_OF_VOTERS_EXPECTED();
-
-                let voterChoices = []
-                let voterTokenBalances = []
-                voterAccs.forEach(async(acc) => {
-                    const choice = Math.round(Math.random());
-                    const tx = await contract.connect(acc).vote(poolAddress, choice ? true : false);
-                    
-                    await tx.wait();
-                    voterChoices.push(choice);
-                    voterTokenBalances.push((await poolToken.balanceOf(acc.address)).toString());
-                })
-
                 const prevContractTokenBalance = (await poolToken.balanceOf(contract.address)).toString();
-                const trueCounts = voterChoices.reduce((acc, curr) => acc + curr, 0);
 
+                let voterChoices = [true, true]; //previous 2 truth votes
+
+                for (const acc of voterAccs.slice(2)) {
+                    const k = (await poolToken.balanceOf(acc2.address)).toString();
+                    voterTokenBalances.push(k);
+                    
+                    const choice = Math.round(Math.random());
+                    voterChoices.push(choice ? true : false);
+                    const tx = await contract.connect(acc).vote(poolAddress, choice ? true : false);
+
+                    await tx.wait();
+                }
+
+                const trueCounts = voterChoices.reduce((acc, curr) => acc + curr, 0);
                 const expectedFeeForEachVoter = +voterFeePaid.toString()/Math.max(trueCounts, votersExpected - trueCounts);
 
+                
                 for (const acc of voterAccs) {
 
                     accIndex = voterAccs.indexOf(acc);
                     tokenBalance = (await poolToken.balanceOf(acc.address)).toString();
 
-                    if (voterChoices[accIndex]) {
-                        expect(+tokenBalance - (+voterTokenBalances[accIndex])).to.equal(expectedFeeForEachVoter);
+                    const checker = (trueCounts > votersExpected - trueCounts) === voterChoices[accIndex];
+
+                    if (checker) {
+                        expect((+tokenBalance) - (+voterTokenBalances[accIndex])).to.equal(expectedFeeForEachVoter);
                     } else {
                         expect(+tokenBalance - (+voterTokenBalances[accIndex])).to.equal(0);
                     }
 
                 }
                 // Confirm contract token balance
-                expect(+prevContractTokenBalance - (+(await poolToken.balanceOf(contract.address)).toString())).to.equal(+voterFeePaid.toString())
                 if (trueCounts > votersExpected/2) expect(await poolContract.defaulted()).to.be.true;
                 else expect(await poolContract.defaulted()).to.be.false;
+                expect(+prevContractTokenBalance - (+(await poolToken.balanceOf(contract.address)).toString())).to.equal(+voterFeePaid.toString())
+                
             })
 
             it("Should have reset all mapping and state objects after 7th vote", async() => {
                 voterAccs.forEach(async acc => {
                     expect(await contract.voterHasVoted(poolAddress, acc.address)).to.be.false;
                 })
-                
-                expect(await contract.trueVoteCount(poolAddress)).to.equal(0);
                 expect(await contract.votingState(poolAddress)).to.be.false;
-                expect(await contract.poolVotes(poolAddress, 0)).to.throw;
+                await expect(contract.poolVotes(poolAddress, 0)).to.be.reverted;
+                expect(await contract.trueVoteCount(poolAddress)).to.equal(0);
+                
             })
 
             it("Should allow a voter vote again if a next cycle is initiated on the pool", async () => {
-                await network.provider.send('evm_revert', [snapshotId]);
+                let resetPoolTx = await controller.resetPoolAfterDefault(poolAddress, (Math.round(Date.now()/1000) + 86400).toString());
 
-                await poolToken.mint(acc9.address, ethers.utils.parseEther('100'));
-                await poolToken.mint(acc10.address, ethers.utils.parseEther('100'));
+                await resetPoolTx.wait();
 
                 await poolToken.connect(acc9).approve(poolAddress, ethers.utils.parseEther('50'));
                 await poolToken.connect(acc10).approve(poolAddress, ethers.utils.parseEther('50'));
-
-                const poolContract = await ethers.getContractAt("CEXDefaultSwap", poolAddress);
 
                 await poolContract.connect(acc9).deposit(ethers.utils.parseEther('20'));
                 await poolContract.connect(acc10).purchase(ethers.utils.parseEther('15'));
 
                 //this is done to ensure pool must default, which is required before resetting.
-                voterAccs.forEach(async(acc) => {
-                    const tx = await contract.connect(acc).vote(poolAddress, true);
-                    
-                    await tx.wait();
-                })
+                for (const acc of voterAccs) {
 
-                const resetPoolTx = await controller.resetPoolAfterDefault(poolAddress, (Math.round(Date.now()/1000) + 86400).toString());
+                    const tx = await contract.connect(acc).vote(poolAddress, true);
+                    await tx.wait();
+                }
+
+                resetPoolTx = await controller.resetPoolAfterDefault(poolAddress, (Math.round(Date.now()/1000) + 86400).toString());
+
                 await resetPoolTx.wait();
 
                 await poolContract.connect(acc9).deposit(ethers.utils.parseEther('20'));
@@ -388,11 +381,11 @@ describe("Voting", function() {
                 await poolContract.connect(acc9).deposit(ethers.utils.parseEther('20'));
                 await poolContract.connect(acc10).purchase(ethers.utils.parseEther('15'));
 
-                const firstVoteTx = contract.connect(acc3).vote(poolAddress, true);
+                const firstVoteTx = contract.connect(acc5).vote(poolAddress, true);
 
                 await firstVoteTx;
 
-                const secondVoteTx = contract.connect(acc3).vote(poolAddress, true);
+                const secondVoteTx = contract.connect(acc5).vote(poolAddress, true);
 
                 expect(secondVoteTx).to.be.revertedWith("Already voted in the current cycle");
 

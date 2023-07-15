@@ -6,7 +6,6 @@ import "./SwapController.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "./interfaces/ICreditDefaultSwap.sol";
 import "./interfaces/ISwapController.sol";
-import "hardhat/console.sol";
 
 /**
 * @title CXDX Multi-sig Voter Contract
@@ -104,7 +103,7 @@ contract Voting is AccessControl {
         , bool choice
         ) external 
         onlyRole(VOTER_ROLE) {
-        console.log("Vote: ", voterHasVoted[_poolAddress][msg.sender]);
+        
         require(!voterHasVoted[_poolAddress][msg.sender], "Already voted in the current cycle");
 
         VoterData memory voterInfo = VoterData(msg.sender, choice);
@@ -123,6 +122,7 @@ contract Voting is AccessControl {
         if (votesForPool.length == NUMBER_OF_VOTERS_EXPECTED) {
             _executeFinalVote(_poolAddress);
         }
+        
 
         emit Vote(_poolAddress, msg.sender, choice, votesForPool.length);
     }
@@ -213,6 +213,7 @@ contract Voting is AccessControl {
             payout = true;
             ICreditDefaultSwap(_poolAddress).setDefaulted();
         }
+        
 
         // Reduce value of voter fee from the Pool Contract
         CEXDefaultSwap(_poolAddress).deductFromVoterFee(amountToPay);
@@ -221,6 +222,7 @@ contract Voting is AccessControl {
             if (votesForPool[i].choice == payout) {
                 // Pay only to voters who are in the rational majority
                 CEXDefaultSwap(_poolAddress).currency().transfer(votesForPool[i].voter, amountToPay/Math.max(votersForTrue, NUMBER_OF_VOTERS_EXPECTED - votersForTrue));
+                
             }
             delete voterHasVoted[_poolAddress][votesForPool[i].voter];
 
@@ -230,6 +232,7 @@ contract Voting is AccessControl {
         delete poolVotes[_poolAddress];
         delete votingState[_poolAddress];
         delete trueVoteCount[_poolAddress];
+        
     }
 
     function _removeVoter(address _voter) private {
