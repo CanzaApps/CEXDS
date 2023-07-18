@@ -44,7 +44,8 @@ contract("CEXDefaultSwap", async () => {
                     poolToken.address,
                     (PREMIUM * 10000).toString(),
                     (INIT_MATURITY_DATE).toString(),
-                    (INIT_EPOCH).toString()
+                    (INIT_EPOCH).toString(),
+                    acc2.address // assumed voting Contract
                 )).deployed();
 
                 const entity = await swapContract.entityName();
@@ -75,7 +76,8 @@ contract("CEXDefaultSwap", async () => {
                         poolToken.address,
                         (PREMIUM * 10000).toString(),
                         currentTime.toString(),
-                        (INIT_EPOCH).toString()
+                        (INIT_EPOCH).toString(),
+                        acc2.address // assumed voting Contract
                     );
     
                     await expect(swapContractDeployer).to.be.revertedWith("Invalid Maturity Date set");
@@ -95,7 +97,8 @@ contract("CEXDefaultSwap", async () => {
                     poolToken.address,
                     (testPremium * 10000).toString(),
                     maturityTime.toString(),
-                    (INIT_EPOCH).toString()
+                    (INIT_EPOCH).toString(),
+                    acc2.address // assumed voting Contract
                 );
 
                 await expect(swapContractDeployer).to.be.revertedWith("Premium can not be 100% or above");
@@ -261,58 +264,4 @@ contract("CEXDefaultSwap", async () => {
     })
 
 })
-
-// describe("Constructor", async () => {
-//     const PREMIUM = 0.1; // Fractional premium
-//     const INIT_EPOCH = 2;
-//     const INIT_MATURITY_DATE = (Date.now()/1000) + 86400;
-//     const ENTITY_NAME = "UbeSwap";
-    
-
-//     const signers = await ethers.getSigners();
-//     console.log("help")
-//     let acc0 = signers[0];
-//     let acc1 = signers[1];
-//     let acc2 = signers[2];
-//     let acc3 = signers[3];
-    
-
-//     // const poolToken = await (await (await ethers.getContractFactory("ERC20Mock")).deploy()).deployed();
-
-//     let swapContract;
-        
-
-//     context("Happy path", () => {
-        
-
-//         it("Should deploy and set global variables", async function() {
-
-//             swapContract = await (await (await ethers.getContractFactory("CEXDEfaultSwap")).deploy(
-//                 ENTITY_NAME,
-//                 poolToken.address,
-//                 PREMIUM * 10000,
-//                 INIT_MATURITY_DATE,
-//                 INIT_EPOCH
-//             )).deployed();
-
-//             const entity = await swapContract.entityName();
-//             const token = (await swapContract.currency()).address;
-//             const maturityDate = BigNumber(await swapContract.maturityDate())
-//             const epochDays = BigNumber(await swapContract.epochDays())
-//             const premium = BigNumber(await swapContract.premium())
-
-//             assert(entity == ENTITY_NAME, "Entity Name Mismatch")
-//             assert(token == poolToken.address, "Pool Currency Mismatch")
-//             assert(maturityDate == INIT_MATURITY_DATE, "Maturity Date Mismatch")
-//             assert(epochDays == INIT_EPOCH, "Epoch Days Mismatch")
-//             assert(premium == PREMIUM * 10000, "Premium Value Mismatch")
-
-//             expect(entity.to.equal(ENTITY_NAME));
-//         })
-//     })
-
-
-// })
-
-
 

@@ -32,8 +32,8 @@ contract Voting is AccessControl {
     uint8 public immutable NUMBER_OF_VOTERS_EXPECTED;
 
     mapping(address => VoterData[]) public poolVotes;
-    mapping(address => uint8) private trueVoteCount;
-    mapping(address => bool) votingState;
+    mapping(address => uint8) public trueVoteCount;
+    mapping(address => bool) public votingState;
     mapping(address => mapping(address => bool)) public voterHasVoted;
     mapping(address => uint256) public poolFees;
 
@@ -103,7 +103,7 @@ contract Voting is AccessControl {
         , bool choice
         ) external 
         onlyRole(VOTER_ROLE) {
-
+        
         require(!voterHasVoted[_poolAddress][msg.sender], "Already voted in the current cycle");
 
         VoterData memory voterInfo = VoterData(msg.sender, choice);
@@ -122,6 +122,7 @@ contract Voting is AccessControl {
         if (votesForPool.length == NUMBER_OF_VOTERS_EXPECTED) {
             _executeFinalVote(_poolAddress);
         }
+        
 
         emit Vote(_poolAddress, msg.sender, choice, votesForPool.length);
     }
@@ -212,6 +213,7 @@ contract Voting is AccessControl {
             payout = true;
             ICreditDefaultSwap(_poolAddress).setDefaulted();
         }
+        
 
         // Reduce value of voter fee from the Pool Contract
         CEXDefaultSwap(_poolAddress).deductFromVoterFee(amountToPay);
@@ -220,6 +222,7 @@ contract Voting is AccessControl {
             if (votesForPool[i].choice == payout) {
                 // Pay only to voters who are in the rational majority
                 CEXDefaultSwap(_poolAddress).currency().transfer(votesForPool[i].voter, amountToPay/Math.max(votersForTrue, NUMBER_OF_VOTERS_EXPECTED - votersForTrue));
+                
             }
             delete voterHasVoted[_poolAddress][votesForPool[i].voter];
 
@@ -229,6 +232,7 @@ contract Voting is AccessControl {
         delete poolVotes[_poolAddress];
         delete votingState[_poolAddress];
         delete trueVoteCount[_poolAddress];
+        
     }
 
     function _removeVoter(address _voter) private {
@@ -240,6 +244,7 @@ contract Voting is AccessControl {
             if (voters[i] == _voter) reachedVoter = true;
 
             if (reachedVoter) voters[i] = voters[voters.length - 1];
+            i++;
         }
         voterList = voters;
         voterList.pop();
