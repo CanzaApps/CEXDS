@@ -27,15 +27,18 @@ contract Voting is AccessControl {
     address public controller;
 
     uint256 public VOTER_RECURRING_PAYMENT_INTERVAL;
-    uint256 public PERCENTAGE_VOTERS_DEFAULT_FEE;
+    uint8 public VOTERS_DEFAULT_FEE_RATIO;
+    uint8 public VOTERS_DEFAULT_FEE_COMPLEMENTARY_RATIO;
     uint256 public PERCENTAGE_VOTERS_RECURRING_FEE;
     uint8 public immutable NUMBER_OF_VOTERS_EXPECTED;
 
+    mapping(address => address[]) public poolVoters;
+    mapping(address => mapping(address => bool)) public isPoolVoter;
     mapping(address => VoterData[]) public poolVotes;
     mapping(address => uint8) public trueVoteCount;
     mapping(address => bool) public votingState;
     mapping(address => mapping(address => bool)) public voterHasVoted;
-    mapping(address => uint256) public poolFees;
+    mapping(address => bool) public poolHasSpecificVoters;
 
     event Vote(address indexed _pool, address _voter, bool _choice, uint256 _votePosition);
     event PayVoters(address[] _currencies, uint256[] _amountPaidOut);
@@ -53,7 +56,8 @@ contract Voting is AccessControl {
         VOTER_RECURRING_PAYMENT_INTERVAL = 30 days;
         NUMBER_OF_VOTERS_EXPECTED = 7;
         PERCENTAGE_VOTERS_RECURRING_FEE = 2500;
-        PERCENTAGE_VOTERS_DEFAULT_FEE = 3333;
+        VOTERS_DEFAULT_FEE_RATIO = 1;
+        VOTERS_DEFAULT_FEE_COMPLEMENTARY_RATIO = 2;
         lastVoterPaymentTimestamp = block.timestamp;
         controller = controllerAddress;
     }
@@ -76,14 +80,17 @@ contract Voting is AccessControl {
 
         for (uint256 i = 0; i < pools.length; i++) {
             address pool = pools[i];
+            address[] memory votersToPay = poolVoters[pool];
+            if (votersToPay.length == 0) votersToPay = voterList;
+
             uint256 totalAmountToPay = CEXDefaultSwap(pool).totalVoterFeePaid() * PERCENTAGE_VOTERS_RECURRING_FEE;
-            uint256 amountPerVoter = totalAmountToPay/(NUMBER_OF_VOTERS_EXPECTED * 10000);
+            uint256 amountPerVoter = totalAmountToPay/(votersToPay.length * 10000);
 
             CEXDefaultSwap(pool).deductFromVoterFee(totalAmountToPay/10000);
             amountsPaidOut[i] = totalAmountToPay/10000;
 
-            for (uint256 j = 0; j < NUMBER_OF_VOTERS_EXPECTED; j++) {
-                CEXDefaultSwap(pool).currency().transfer(voterList[j], amountPerVoter);
+            for (uint256 j = 0; j < votersToPay.length; j++) {
+                CEXDefaultSwap(pool).currency().transfer(votersToPay[j], amountPerVoter);
             }
             
         }
@@ -101,10 +108,15 @@ contract Voting is AccessControl {
     function vote(
         address _poolAddress
         , bool choice
-        ) external 
-        onlyRole(VOTER_ROLE) {
+        ) external {
         
+        require(poolHasSpecificVoters[_poolAddress] && isPoolVoter[_poolAddress][msg.sender] || 
+        (!poolHasSpecificVoters[_poolAddress] && hasRole(VOTER_ROLE, msg.sender))
+        , "Not authorized to vote for this Swap");
         require(!voterHasVoted[_poolAddress][msg.sender], "Already voted in the current cycle");
+
+        uint8 trueVotes = trueVoteCount[_poolAddress];
+        if(trueVotes < 2 && choice == false) revert("Requires first 2 votes to be true");
 
         VoterData memory voterInfo = VoterData(msg.sender, choice);
         poolVotes[_poolAddress].push(voterInfo);
@@ -127,6 +139,13 @@ contract Voting is AccessControl {
         emit Vote(_poolAddress, msg.sender, choice, votesForPool.length);
     }
 
+    function setVotersForPool(address[] memory _voters, address _pool) external {
+        if (msg.sender != controller) revert("Not authorized");
+
+        poolVoters[_pool] = _voters;
+        poolHasSpecificVoters[_pool] = true;
+    }
+
     /**
      * @notice grant VOTER_ROLE role to voters to enable them engage in voting process. Must revert when `NUMBER_OF_VOTERS_EXPECTED` is reached.
      * @param voters List of voters to add to the contract
@@ -141,7 +160,7 @@ contract Voting is AccessControl {
         uint256 i;
         while (i < newVotersCount) {
             address voter = voters[i];
-            _addVoter(voter);
+            _addVoter(voter, address(0));
             i++;
         }
     }
@@ -157,9 +176,24 @@ contract Voting is AccessControl {
         ) external 
         onlyRole(SUPER_ADMIN) {
         
-        _removeVoter(oldVoter);
-        _addVoter(replacement);
+        replaceVoter(oldVoter, replacement, address(0));
 
+    }
+
+    /**
+     * @notice Replace a voter with another since number of voters must always be maintained when a voter is to be removed.
+     * @param oldVoter Voter address to be removed
+     * @param replacement Voter replacement address
+     */
+    function replaceVoter(
+        address oldVoter
+        , address replacement
+        , address _pool
+        ) public 
+        onlyRole(SUPER_ADMIN) {
+
+        _removeVoter(oldVoter, _pool);
+        _addVoter(replacement, _pool);
     }
 
     /**
@@ -185,15 +219,36 @@ contract Voting is AccessControl {
     }
 
     /**
-     * @notice Set percentage of total pool fee to be accumulated for maker fee paid into the pool contracts.
-     * @param _newValue New value for the fee.
+     * @notice Set the ratio of total pool fee to be accumulated for maker fee paid into the pool contracts.
+     * @param _newVoterFeeRatio New value for the fee ratio.
+     * @param _newVoterFeeComplementaryRatio New value for the complementary ratio.
      */
     function setPercentageVoterDefaultFee(
-        uint256 _newValue
+        uint8 _newVoterFeeRatio
+        , uint8 _newVoterFeeComplementaryRatio
         ) external 
         onlyRole(SUPER_ADMIN) {
         
-        PERCENTAGE_VOTERS_DEFAULT_FEE = _newValue;
+        VOTERS_DEFAULT_FEE_RATIO = _newVoterFeeRatio;
+        VOTERS_DEFAULT_FEE_RATIO = _newVoterFeeComplementaryRatio;
+    }
+
+    function clearVotingData(address _poolAddress) external {
+        if (msg.sender != controller) revert("Unauthorized.");
+
+        VoterData[] memory votesForPool = poolVotes[_poolAddress];
+        if (votesForPool.length != NUMBER_OF_VOTERS_EXPECTED) revert("Vote Cycle has not ended.");
+
+        uint256 i;
+        while (i < NUMBER_OF_VOTERS_EXPECTED) {
+            delete voterHasVoted[_poolAddress][votesForPool[i].voter];
+
+            i++;
+        }
+
+        delete poolVotes[_poolAddress];
+        delete votingState[_poolAddress];
+        delete trueVoteCount[_poolAddress];
     }
 
     // Internals
@@ -203,64 +258,85 @@ contract Voting is AccessControl {
         VoterData[] memory votesForPool = poolVotes[_poolAddress];
 
         uint8 i = 0;
-        bool payout;
         uint8 votersForTrue = trueVoteCount[_poolAddress];
-        uint256 amountToPay = CEXDefaultSwap(_poolAddress).totalVoterFeePaid();
-        
-        // Unpause swap first as setDefaulted would revert if paused
-        ICreditDefaultSwap(_poolAddress).unpause();
-        if (votersForTrue > NUMBER_OF_VOTERS_EXPECTED/2) {
-            payout = true;
-            ICreditDefaultSwap(_poolAddress).setDefaulted();
+        bool payout;
+
+        if (poolHasSpecificVoters[_poolAddress]) {
+            payout = votersForTrue > poolVoters[_poolAddress].length/2;
+        } else {
+            payout = votersForTrue > NUMBER_OF_VOTERS_EXPECTED/2;
         }
         
+        uint256 amountToPay = CEXDefaultSwap(_poolAddress).totalVoterFeePaid();
 
         // Reduce value of voter fee from the Pool Contract
         CEXDefaultSwap(_poolAddress).deductFromVoterFee(amountToPay);
+
+        if (payout) {
+            ICreditDefaultSwap(_poolAddress).setDefaulted();
+        } else {
+            ICreditDefaultSwap(_poolAddress).unpause();
+            delete poolVotes[_poolAddress];
+            delete votingState[_poolAddress];
+            delete trueVoteCount[_poolAddress];
+        } 
 
         while (i < NUMBER_OF_VOTERS_EXPECTED) {
             if (votesForPool[i].choice == payout) {
                 // Pay only to voters who are in the rational majority
                 CEXDefaultSwap(_poolAddress).currency().transfer(votesForPool[i].voter, amountToPay/Math.max(votersForTrue, NUMBER_OF_VOTERS_EXPECTED - votersForTrue));
-                
             }
-            delete voterHasVoted[_poolAddress][votesForPool[i].voter];
+
+            if (!payout) delete voterHasVoted[_poolAddress][votesForPool[i].voter];
 
             i++;
         }
-
-        delete poolVotes[_poolAddress];
-        delete votingState[_poolAddress];
-        delete trueVoteCount[_poolAddress];
         
     }
 
-    function _removeVoter(address _voter) private {
-        _checkRole(VOTER_ROLE, _voter);
+    function _removeVoter(address _voter, address _poolAddress) private {
+
         uint i;
         bool reachedVoter;
         address[] memory voters = voterList;
+        if (poolHasSpecificVoters[_poolAddress]) voters = poolVoters[_poolAddress];
         while (i < voters.length - 1) {
             if (voters[i] == _voter) reachedVoter = true;
 
             if (reachedVoter) voters[i] = voters[voters.length - 1];
             i++;
         }
-        voterList = voters;
-        voterList.pop();
-        revokeRole(VOTER_ROLE, _voter);
+
+        if (poolHasSpecificVoters[_poolAddress]) {
+            poolVoters[_poolAddress] = voters;
+            poolVoters[_poolAddress].pop();
+        } else {
+            voterList = voters;
+            voterList.pop();
+            revokeRole(VOTER_ROLE, _voter);
+        }
+        
         emit RemoveVoter(_voter);
 
     }
 
-    function _addVoter(address _voter) private {
-        require(!hasRole(VOTER_ROLE, _voter), "Already a voter");
-        voterList.push(_voter);
-        grantRole(VOTER_ROLE, _voter);
+    function _addVoter(address _voter, address _poolAddress) private {
+        if (poolHasSpecificVoters[_poolAddress]) {
+            poolVoters[_poolAddress].push(_voter);
+        } else {
+            voterList.push(_voter);
+            grantRole(VOTER_ROLE, _voter);
+        }
+        
         emit AddVoter(_voter);
     }
 
-    function getVoterList() external view returns (address[] memory) {
+    function getVoterList(address _poolAddress) external view returns (address[] memory) {
+        if (poolHasSpecificVoters[_poolAddress]) return poolVoters[_poolAddress];
         return voterList;
+    }
+
+    function getVoterFeeRatio() external view returns (uint8, uint8) {
+        return (VOTERS_DEFAULT_FEE_RATIO, VOTERS_DEFAULT_FEE_COMPLEMENTARY_RATIO);
     }
 }

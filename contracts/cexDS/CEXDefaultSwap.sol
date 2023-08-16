@@ -329,6 +329,7 @@ contract CEXDefaultSwap {
     function setDefaulted() external validCaller {
         require(!defaulted, "Contract already defaulted");
         defaulted = true;
+        paused = false;
         execute();
     }
 

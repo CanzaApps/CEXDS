@@ -70,6 +70,7 @@ contract SwapController is AccessControl {
     
     function resetPoolAfterDefault(address _add, uint256 _newMaturityDate) external onlyRole(SUPER_ADMIN) {
         ICreditDefaultSwap(_add).resetAfterDefault(_newMaturityDate);
+        Voting(votingContract).clearVotingData(_add);
     }
 
     function setVotingContract(address _address) external onlyRole(SUPER_ADMIN) {
