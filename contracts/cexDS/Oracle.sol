@@ -3,6 +3,7 @@ pragma solidity ^0.8.18;
 
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
+import "./interfaces/ISwapController.sol";
 
 contract RateOracle is AccessControl {
 
@@ -47,10 +48,15 @@ contract RateOracle is AccessControl {
         NUMBER_OF_VOTERS_EXPECTED = votersRequired;
     }
 
+    modifier isSuperAdminOrPoolOwner(address _pool) {
+        if(!hasRole(ISwapController(controllerAddress).getPoolOwnerRole(_pool), msg.sender) && !hasRole(SUPER_ADMIN, msg.sender)) revert("Unauthorized");
+        _;
+    }
+
     function grantPoolOwnerRole(address _poolAddress, address _owner) external {
 
         require(msg.sender == controllerAddress, "Not authorised");
-        bytes32 ownerRole = getPoolOwnerRole(_poolAddress);
+        bytes32 ownerRole = ISwapController(controllerAddress).getPoolOwnerRole(_poolAddress);
 
         _setRoleAdmin(ownerRole, SUPER_ADMIN);
         grantRole(ownerRole, _owner);
@@ -69,8 +75,7 @@ contract RateOracle is AccessControl {
         uint8 _newVoterFeeRatio
         , uint8 _newVoterFeeComplementaryRatio
         , address _poolAddress
-    ) external {
-        require(hasRole(SUPER_ADMIN, msg.sender) || hasRole(getPoolOwnerRole(_poolAddress), msg.sender), "Unauthorised");
+    ) external isSuperAdminOrPoolOwner(_poolAddress) {
         voterFeeRatioOverride[_poolAddress] = FeeRatioOverride(_newVoterFeeRatio, _newVoterFeeComplementaryRatio);
     }
 
@@ -83,8 +88,7 @@ contract RateOracle is AccessControl {
     function setNumberOfVotersOverride(
         uint8 _newValue
         , address _poolAddress
-    ) external {
-        require(hasRole(SUPER_ADMIN, msg.sender) || hasRole(getPoolOwnerRole(_poolAddress), msg.sender), "Unauthorised");
+    ) external isSuperAdminOrPoolOwner(_poolAddress) {
         numberOfVotersOverride[_poolAddress] = _newValue;
     }
 
@@ -97,8 +101,7 @@ contract RateOracle is AccessControl {
     function setVotersPaymentIntervalOverride(
         uint256 _newInterval
         , address _poolAddress
-    ) external {
-        require(hasRole(SUPER_ADMIN, msg.sender) || hasRole(getPoolOwnerRole(_poolAddress), msg.sender), "Unauthorised");
+    ) external isSuperAdminOrPoolOwner(_poolAddress) {
         paymentIntervalOverride[_poolAddress] = _newInterval;
     }
 
@@ -114,8 +117,7 @@ contract RateOracle is AccessControl {
         uint8 _newRecurringFeeRatio
         , uint8 _newRecurringFeeComplementaryRatio
         , address _poolAddress
-    ) external {
-        require(hasRole(SUPER_ADMIN, msg.sender) || hasRole(getPoolOwnerRole(_poolAddress), msg.sender), "Unauthorised");
+    ) external isSuperAdminOrPoolOwner(_poolAddress) {
         recurringFeeRatioOverride[_poolAddress] = FeeRatioOverride(_newRecurringFeeRatio, _newRecurringFeeComplementaryRatio);
     }
 

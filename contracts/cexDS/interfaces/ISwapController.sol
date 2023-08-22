@@ -7,4 +7,6 @@ interface ISwapController {
     function swapList() external view returns (address[] memory);
 
     function PERCENTAGE_VOTERS_DEFAULT_FEE() external view returns (uint256);
+
+    function getPoolOwnerRole(address _poolAddress) external pure returns (bytes32 ownerRole);
 }
