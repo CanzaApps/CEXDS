@@ -13,6 +13,7 @@ contract SwapController is AccessControl {
 
     address[] public swapList;
     address public votingContract;
+    address public oracleContract;
 
     constructor(
         address secondSuperAdmin
@@ -24,6 +25,11 @@ contract SwapController is AccessControl {
 
     modifier isAdmin() {
         if(!hasRole(ADMIN_CONTROLLER, msg.sender) && !hasRole(SUPER_ADMIN, msg.sender)) revert("Caller does not have any of the admin roles");
+        _;
+    }
+
+    modifier isSuperAdminOrPoolOwner(address _pool) {
+        if(!hasRole(getPoolOwnerRole(_pool), msg.sender) && !hasRole(SUPER_ADMIN, msg.sender)) revert("Unauthorized");
         _;
     }
 
@@ -41,8 +47,9 @@ contract SwapController is AccessControl {
         uint256 _initialMaturityDate,
         uint256 _epochDays
 
-    ) public isAdmin {
+    ) public isAdmin returns (address contractAddress) {
         require(votingContract != address(0x00), "Set Voting Contract first");
+        require(oracleContract != address(0x00), "Set Oracle Contract first");
 
         CEXDefaultSwap swapContract = new CEXDefaultSwap(
             _entityName,
@@ -50,26 +57,44 @@ contract SwapController is AccessControl {
             _premium,
             _initialMaturityDate,
             _epochDays,
-            votingContract
+            votingContract,
+            oracleContract
         );
 
-        address contractAddress = address(swapContract);
+        contractAddress = address(swapContract);
 
         //Add to master list
         swapList.push(contractAddress);
 
     }
 
-    function setPoolPaused(address _add) external onlyRole(SUPER_ADMIN) {
+    function createSwapContract(
+        string memory _entityName,
+        address _currency,
+        uint256 _premium,
+        uint256 _initialMaturityDate,
+        uint256 _epochDays,
+        address _owner
+
+    ) public isAdmin {
+        address poolAddress = createSwapContract(_entityName, _currency, _premium, _initialMaturityDate, _epochDays);
+        bytes32 ownerRole = getPoolOwnerRole(poolAddress);
+        _setRoleAdmin(ownerRole, SUPER_ADMIN);
+        grantRole(ownerRole, _owner);
+
+    }
+
+    function setPoolPaused(address _add) external isSuperAdminOrPoolOwner(_add) {
         ICreditDefaultSwap(_add).pause();
     }
 
-    function setPoolUnpaused(address _add) external onlyRole(SUPER_ADMIN) {
+    function setPoolUnpaused(address _add) external isSuperAdminOrPoolOwner(_add) {
         ICreditDefaultSwap(_add).unpause();
     }
     
-    function resetPoolAfterDefault(address _add, uint256 _newMaturityDate) external onlyRole(SUPER_ADMIN) {
+    function resetPoolAfterDefault(address _add, uint256 _newMaturityDate) external isSuperAdminOrPoolOwner(_add) {
         ICreditDefaultSwap(_add).resetAfterDefault(_newMaturityDate);
+        Voting(votingContract).clearVotingData(_add);
     }
 
     function setVotingContract(address _address) external onlyRole(SUPER_ADMIN) {
@@ -78,8 +103,22 @@ contract SwapController is AccessControl {
         votingContract = _address;
     }
 
+    function setOracleContract(address _address) external onlyRole(SUPER_ADMIN) {
+        if (_address == oracleContract) revert("Already set");
+
+        oracleContract = _address;
+    }
+
     function getSwapList() external view returns (address[] memory) {
         return swapList;
+    }
+
+    function getPoolOwnerRole(address _poolAddress) public pure returns (bytes32 ownerRole) {
+        ownerRole = bytes32(abi.encodePacked(
+            "Pool ",
+            Strings.toHexString(uint160(_poolAddress), 20),
+            " Owner Role"
+        ));
     }
 
 }

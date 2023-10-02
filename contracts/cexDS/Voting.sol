@@ -6,6 +6,7 @@ import "./SwapController.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "./interfaces/ICreditDefaultSwap.sol";
 import "./interfaces/ISwapController.sol";
+import "./interfaces/IOracle.sol";
 
 /**
 * @title CXDX Multi-sig Voter Contract
@@ -25,17 +26,15 @@ contract Voting is AccessControl {
     uint256 public lastVoterPaymentTimestamp;
     uint256 public totalVoterFee;
     address public controller;
+    address public oracleAddress;
 
-    uint256 public VOTER_RECURRING_PAYMENT_INTERVAL;
-    uint256 public PERCENTAGE_VOTERS_DEFAULT_FEE;
-    uint256 public PERCENTAGE_VOTERS_RECURRING_FEE;
-    uint8 public immutable NUMBER_OF_VOTERS_EXPECTED;
-
+    mapping(address => address[]) public poolVoters;
+    mapping(address => mapping(address => bool)) public isPoolVoter;
     mapping(address => VoterData[]) public poolVotes;
     mapping(address => uint8) public trueVoteCount;
     mapping(address => bool) public votingState;
     mapping(address => mapping(address => bool)) public voterHasVoted;
-    mapping(address => uint256) public poolFees;
+    mapping(address => bool) public poolHasSpecificVoters;
 
     event Vote(address indexed _pool, address _voter, bool _choice, uint256 _votePosition);
     event PayVoters(address[] _currencies, uint256[] _amountPaidOut);
@@ -44,18 +43,15 @@ contract Voting is AccessControl {
 
     constructor(
         address secondSuperAdmin,
-        address controllerAddress
+        address controllerAddress,
+        address oracle
     ) {
         _setupRole(SUPER_ADMIN, msg.sender);
         _setupRole(SUPER_ADMIN, secondSuperAdmin);
         _setRoleAdmin(VOTER_ROLE, SUPER_ADMIN);
-
-        VOTER_RECURRING_PAYMENT_INTERVAL = 30 days;
-        NUMBER_OF_VOTERS_EXPECTED = 7;
-        PERCENTAGE_VOTERS_RECURRING_FEE = 2500;
-        PERCENTAGE_VOTERS_DEFAULT_FEE = 3333;
         lastVoterPaymentTimestamp = block.timestamp;
         controller = controllerAddress;
+        oracleAddress = oracle;
     }
 
     /**
@@ -69,21 +65,23 @@ contract Voting is AccessControl {
         onlyRole(SUPER_ADMIN) 
         returns (address[] memory pools, uint256[] memory amountsPaidOut) {
 
-        if(block.timestamp < lastVoterPaymentTimestamp + VOTER_RECURRING_PAYMENT_INTERVAL) revert("Recurring payment time not reached");
-
         pools = ISwapController(controller).swapList();
         amountsPaidOut = new uint256[](pools.length);
 
         for (uint256 i = 0; i < pools.length; i++) {
             address pool = pools[i];
-            uint256 totalAmountToPay = CEXDefaultSwap(pool).totalVoterFeePaid() * PERCENTAGE_VOTERS_RECURRING_FEE;
-            uint256 amountPerVoter = totalAmountToPay/(NUMBER_OF_VOTERS_EXPECTED * 10000);
+            if(block.timestamp < lastVoterPaymentTimestamp + IOracle(oracleAddress).getRecurringPaymentInterval(pool)) continue;
+            address[] memory votersToPay = poolVoters[pool];
+            if (votersToPay.length == 0) votersToPay = voterList;
+
+            uint256 totalAmountToPay = IOracle(oracleAddress).getRecurringFeeAmount(CEXDefaultSwap(pool).totalVoterFeePaid(), pool); 
+            uint256 amountPerVoter = totalAmountToPay/(votersToPay.length * 10000);
 
             CEXDefaultSwap(pool).deductFromVoterFee(totalAmountToPay/10000);
             amountsPaidOut[i] = totalAmountToPay/10000;
 
-            for (uint256 j = 0; j < NUMBER_OF_VOTERS_EXPECTED; j++) {
-                CEXDefaultSwap(pool).currency().transfer(voterList[j], amountPerVoter);
+            for (uint256 j = 0; j < votersToPay.length; j++) {
+                CEXDefaultSwap(pool).currency().transfer(votersToPay[j], amountPerVoter);
             }
             
         }
@@ -101,10 +99,15 @@ contract Voting is AccessControl {
     function vote(
         address _poolAddress
         , bool choice
-        ) external 
-        onlyRole(VOTER_ROLE) {
+        ) external {
         
+        require(poolHasSpecificVoters[_poolAddress] && isPoolVoter[_poolAddress][msg.sender] || 
+        (!poolHasSpecificVoters[_poolAddress] && hasRole(VOTER_ROLE, msg.sender))
+        , "Not authorized to vote for this Swap");
         require(!voterHasVoted[_poolAddress][msg.sender], "Already voted in the current cycle");
+
+        uint8 trueVotes = trueVoteCount[_poolAddress];
+        if(trueVotes < 2 && choice == false) revert("Requires first 2 votes to be true");
 
         VoterData memory voterInfo = VoterData(msg.sender, choice);
         poolVotes[_poolAddress].push(voterInfo);
@@ -119,12 +122,19 @@ contract Voting is AccessControl {
             ICreditDefaultSwap(_poolAddress).pause();
         }
 
-        if (votesForPool.length == NUMBER_OF_VOTERS_EXPECTED) {
+        if (votesForPool.length == IOracle(oracleAddress).getNumberOfVotersRequired(_poolAddress)) {
             _executeFinalVote(_poolAddress);
         }
         
 
         emit Vote(_poolAddress, msg.sender, choice, votesForPool.length);
+    }
+
+    function setVotersForPool(address[] memory _voters, address _pool) external {
+        if (msg.sender != controller) revert("Not authorized");
+
+        poolVoters[_pool] = _voters;
+        poolHasSpecificVoters[_pool] = true;
     }
 
     /**
@@ -137,11 +147,11 @@ contract Voting is AccessControl {
         onlyRole(SUPER_ADMIN) {
         
         uint256 newVotersCount = voters.length;
-        require(voterList.length + newVotersCount <= NUMBER_OF_VOTERS_EXPECTED, "Voters added exceed allowable number of voters");
+        require(voterList.length + newVotersCount <= IOracle(oracleAddress).getNumberOfVotersRequired(address(0)), "Voters added exceed allowable number of voters");
         uint256 i;
         while (i < newVotersCount) {
             address voter = voters[i];
-            _addVoter(voter);
+            _addVoter(voter, address(0));
             i++;
         }
     }
@@ -157,73 +167,34 @@ contract Voting is AccessControl {
         ) external 
         onlyRole(SUPER_ADMIN) {
         
-        _removeVoter(oldVoter);
-        _addVoter(replacement);
+        replaceVoter(oldVoter, replacement, address(0));
 
     }
 
     /**
-     * @notice Set interval for paying `PERCENTAGE_VOTERS_RECURRING_FEE` to voters.
-     * @param _newInterval New time frequency for paying reward.
+     * @notice Replace a voter with another since number of voters must always be maintained when a voter is to be removed.
+     * @param oldVoter Voter address to be removed
+     * @param replacement Voter replacement address
      */
-    function setVoterRecurringPaymentInterval(
-        uint256 _newInterval
-        ) external 
+    function replaceVoter(
+        address oldVoter
+        , address replacement
+        , address _pool
+        ) public 
         onlyRole(SUPER_ADMIN) {
-        VOTER_RECURRING_PAYMENT_INTERVAL = _newInterval;
+
+        _removeVoter(oldVoter, _pool);
+        _addVoter(replacement, _pool);
     }
 
-    /**
-     * @notice Set percentage fee to be paid to voters at the specified interval
-     * @param _newValue New fee percentage to be paid.
-     */
-    function setPercentageVoterRecurringFee(
-        uint256 _newValue
-        ) external 
-        onlyRole(SUPER_ADMIN) {
-        PERCENTAGE_VOTERS_RECURRING_FEE = _newValue;
-    }
-
-    /**
-     * @notice Set percentage of total pool fee to be accumulated for maker fee paid into the pool contracts.
-     * @param _newValue New value for the fee.
-     */
-    function setPercentageVoterDefaultFee(
-        uint256 _newValue
-        ) external 
-        onlyRole(SUPER_ADMIN) {
-        
-        PERCENTAGE_VOTERS_DEFAULT_FEE = _newValue;
-    }
-
-    // Internals
-
-    // Handles implementation for the 7th vote of a particular cycle of votes
-    function _executeFinalVote(address _poolAddress) private {
+    function clearVotingData(address _poolAddress) external {
+        if (msg.sender != controller) revert("Unauthorized.");
+        uint8 voterCount = IOracle(oracleAddress).getNumberOfVotersRequired(_poolAddress);
         VoterData[] memory votesForPool = poolVotes[_poolAddress];
+        if (votesForPool.length != voterCount) revert("Vote Cycle has not ended.");
 
-        uint8 i = 0;
-        bool payout;
-        uint8 votersForTrue = trueVoteCount[_poolAddress];
-        uint256 amountToPay = CEXDefaultSwap(_poolAddress).totalVoterFeePaid();
-        
-        // Unpause swap first as setDefaulted would revert if paused
-        ICreditDefaultSwap(_poolAddress).unpause();
-        if (votersForTrue > NUMBER_OF_VOTERS_EXPECTED/2) {
-            payout = true;
-            ICreditDefaultSwap(_poolAddress).setDefaulted();
-        }
-        
-
-        // Reduce value of voter fee from the Pool Contract
-        CEXDefaultSwap(_poolAddress).deductFromVoterFee(amountToPay);
-
-        while (i < NUMBER_OF_VOTERS_EXPECTED) {
-            if (votesForPool[i].choice == payout) {
-                // Pay only to voters who are in the rational majority
-                CEXDefaultSwap(_poolAddress).currency().transfer(votesForPool[i].voter, amountToPay/Math.max(votersForTrue, NUMBER_OF_VOTERS_EXPECTED - votersForTrue));
-                
-            }
+        uint256 i;
+        while (i < voterCount) {
             delete voterHasVoted[_poolAddress][votesForPool[i].voter];
 
             i++;
@@ -232,35 +203,90 @@ contract Voting is AccessControl {
         delete poolVotes[_poolAddress];
         delete votingState[_poolAddress];
         delete trueVoteCount[_poolAddress];
+    }
+
+    // Internals
+
+    // Handles implementation for the 7th vote of a particular cycle of votes
+    function _executeFinalVote(address _poolAddress) private {
+        VoterData[] memory votesForPool = poolVotes[_poolAddress];
+        uint8 voterCount = IOracle(oracleAddress).getNumberOfVotersRequired(_poolAddress);
+        uint8 i = 0;
+        uint8 votersForTrue = trueVoteCount[_poolAddress];
+        bool payout;
+
+        if (poolHasSpecificVoters[_poolAddress]) {
+            payout = votersForTrue > poolVoters[_poolAddress].length/2;
+        } else {
+            payout = votersForTrue > voterCount/2;
+        }
+        
+        uint256 amountToPay = CEXDefaultSwap(_poolAddress).totalVoterFeePaid();
+
+        // Reduce value of voter fee from the Pool Contract
+        CEXDefaultSwap(_poolAddress).deductFromVoterFee(amountToPay);
+
+        if (payout) {
+            ICreditDefaultSwap(_poolAddress).setDefaulted();
+        } else {
+            ICreditDefaultSwap(_poolAddress).unpause();
+            delete poolVotes[_poolAddress];
+            delete votingState[_poolAddress];
+            delete trueVoteCount[_poolAddress];
+        } 
+
+        while (i < voterCount) {
+            if (votesForPool[i].choice == payout) {
+                // Pay only to voters who are in the rational majority
+                CEXDefaultSwap(_poolAddress).currency().transfer(votesForPool[i].voter, amountToPay/Math.max(votersForTrue, voterCount - votersForTrue));
+            }
+
+            if (!payout) delete voterHasVoted[_poolAddress][votesForPool[i].voter];
+
+            i++;
+        }
         
     }
 
-    function _removeVoter(address _voter) private {
-        _checkRole(VOTER_ROLE, _voter);
+    function _removeVoter(address _voter, address _poolAddress) private {
+
         uint i;
         bool reachedVoter;
         address[] memory voters = voterList;
+        if (poolHasSpecificVoters[_poolAddress]) voters = poolVoters[_poolAddress];
         while (i < voters.length - 1) {
             if (voters[i] == _voter) reachedVoter = true;
 
             if (reachedVoter) voters[i] = voters[voters.length - 1];
             i++;
         }
-        voterList = voters;
-        voterList.pop();
-        revokeRole(VOTER_ROLE, _voter);
+
+        if (poolHasSpecificVoters[_poolAddress]) {
+            poolVoters[_poolAddress] = voters;
+            poolVoters[_poolAddress].pop();
+        } else {
+            voterList = voters;
+            voterList.pop();
+            revokeRole(VOTER_ROLE, _voter);
+        }
+        
         emit RemoveVoter(_voter);
 
     }
 
-    function _addVoter(address _voter) private {
-        require(!hasRole(VOTER_ROLE, _voter), "Already a voter");
-        voterList.push(_voter);
-        grantRole(VOTER_ROLE, _voter);
+    function _addVoter(address _voter, address _poolAddress) private {
+        if (poolHasSpecificVoters[_poolAddress]) {
+            poolVoters[_poolAddress].push(_voter);
+        } else {
+            voterList.push(_voter);
+            grantRole(VOTER_ROLE, _voter);
+        }
+        
         emit AddVoter(_voter);
     }
 
-    function getVoterList() external view returns (address[] memory) {
+    function getVoterList(address _poolAddress) external view returns (address[] memory) {
+        if (poolHasSpecificVoters[_poolAddress]) return poolVoters[_poolAddress];
         return voterList;
     }
 }

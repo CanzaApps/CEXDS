@@ -4,6 +4,7 @@ pragma solidity ^0.8.18;
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "./Voting.sol";
+import "./interfaces/IOracle.sol";
 
 contract CEXDefaultSwap {
 
@@ -13,6 +14,7 @@ contract CEXDefaultSwap {
     IERC20 public currency;
     bool public defaulted;
     address public votingContract;
+    address public oracleContract;
     address public controller;
     uint256 public totalVoterFeePaid;
 
@@ -74,7 +76,8 @@ contract CEXDefaultSwap {
         uint256 _premium,
         uint256 _initialMaturityDate,
         uint256 _epochDays,
-        address _votingContract
+        address _votingContract,
+        address _oracle
     ) {
         require(_initialMaturityDate > block.timestamp, "Invalid Maturity Date set");
         require(_premium < 10000, "Premium can not be 100% or above");
@@ -84,6 +87,7 @@ contract CEXDefaultSwap {
         maturityDate = _initialMaturityDate;
         epochDays = _epochDays;
         votingContract = _votingContract;
+        oracleContract = _oracle;
         controller = msg.sender;
     }
 
@@ -160,8 +164,7 @@ contract CEXDefaultSwap {
         uint256 totalPayable = makerFeePayable + premiumPayable;
 
         _transferFrom(totalPayable);
-        uint256 voterFeeRate = Voting(votingContract).PERCENTAGE_VOTERS_DEFAULT_FEE();
-        uint256 voterFee = (makerFeePayable * voterFeeRate)/10000;
+        uint256 voterFee = IOracle(oracleContract).getDefaultFeeAmount(makerFeePayable, address(this));
         _transferTo(voterFee, votingContract);
         _transferTo(makerFeePayable - voterFee, controller);
         totalVoterFeePaid += voterFee;
@@ -329,6 +332,7 @@ contract CEXDefaultSwap {
     function setDefaulted() external validCaller {
         require(!defaulted, "Contract already defaulted");
         defaulted = true;
+        paused = false;
         execute();
     }
 
