@@ -11,47 +11,69 @@ async function main() {
 
 const acc0 = await hre.ethers.getSigner();
 //   let signers = [acc0, acc1, acc2, acc3, acc4, acc5, acc6, acc7, acc8, acc9, acc10];
-  const secondAdmin = "0x1d80b14fc72d953eDfD87bF4d6Acd08547E3f1F6";
+  const secondAdmin = "0x940F80Cd7cA57a2565DAF3D79980f90A32233b80";
 
-//   const MockToken = await hre.ethers.getContractFactory("ERC20Mock");
-//   const mockToken = await MockToken.deploy();
+  // const MockToken = await hre.ethers.getContractFactory("ERC20Mock");
+  // const mockToken = await MockToken.deploy();
 
-//   await mockToken.deployed();
-//   console.log("Mock Token deployed to ", mockToken.address);
+  // await mockToken.deployed();
+  // console.log("Mock Token deployed to ", mockToken.address);
 
-  const CEXDeployer = await hre.ethers.getContractFactory("SwapController");
-  const cexDeployer = await CEXDeployer.deploy(secondAdmin);
+  // const CEXDeployer = await hre.ethers.getContractFactory("SwapController");
+  // const cexDeployer = await CEXDeployer.deploy(secondAdmin);
 
-  await cexDeployer.deployed();
+  // await cexDeployer.deployed();
 
-  console.log("CEX Deployer deployed to ", cexDeployer.address);
+  // console.log("CEX Deployer deployed to ", cexDeployer.address);
 
-  const superAdmin = await cexDeployer.SUPER_ADMIN();
-  const doIhaverole = await cexDeployer.hasRole(superAdmin, acc0.address);
+  // const superAdmin = await cexDeployer.SUPER_ADMIN();
+  // const doIhaverole = await cexDeployer.hasRole(superAdmin, acc0.address);
 
-  console.log({ superAdmin, doIhaverole })
+  // console.log({ superAdmin, doIhaverole })
+
+  // const Oracle = await hre.ethers.getContractFactory("RateOracle");
+  // const oracle = await Oracle.deploy(cexDeployer.address, secondAdmin, 1, 2, 1, 3, 7, (30*24*3600).toString());
+
+  // await oracle.deployed();
+
+  // console.log("Oracle deployed to ", oracle.address);
+  const cexDeployer = await hre.ethers.getContractAt("SwapController", "0xC11c96eF0E984a52E10Ed091E0983704a53bAce4")
+  const oracleAddress = await cexDeployer.oracleContract();
+  console.log({oracleAddress})
 
   const Voting = await hre.ethers.getContractFactory("Voting");
-  const voting = await Voting.deploy(secondAdmin, cexDeployer.address);
+  const voting = await Voting.deploy(secondAdmin, cexDeployer.address, oracleAddress);
 
   await voting.deployed();
   console.log("Voting deployed to ", voting.address);
-
+  
   // Add Voting Contract to controller
   const trx = await cexDeployer.setVotingContract(voting.address);
   await trx.wait();
-  console.log("Here");
+  // const trx2 = await cexDeployer.setOracleContract(oracle.address);
+  // await trx2.wait();
+  // console.log("Here");
 
-  const poolMatureTime = Math.round(Date.now()/1000) + (4*86400);
+  // const poolMatureTime = Math.round(Date.now()/1000) + (4*86400);
 
-  let txSwap = await cexDeployer.createSwapContract("Binancay", "0x5bd836f690c299F8912135d36812889B6C369780", "100", poolMatureTime.toString(), 3);
+  // let txSwap = await cexDeployer.createSwapContract("Binance", "0x5bd836f690c299F8912135d36812889B6C369780", "100", poolMatureTime.toString(), 3);
 
-  await txSwap.wait();
+  // await txSwap.wait();
 
-  txSwap = await cexDeployer.createSwapContract("Canzer", "0x0E57b62ABe5873c0eF25d576C3a098d872102330", "120", (poolMatureTime + (2*86400)).toString(), 3);
+  // txSwap = await cexDeployer.createSwapContract("Gate.io", "0x0E57b62ABe5873c0eF25d576C3a098d872102330", "120", (poolMatureTime + (2*86400)).toString(), 3);
 
-  await txSwap.wait();
+  // await txSwap.wait();
 
+
+
+  // txSwap = await cexDeployer.createSwapContractAsThirdParty("Gate.io", "0x5bd836f690c299F8912135d36812889B6C369780", "80", (poolMatureTime + (5*86400)).toString(), 5, "0xa1123e43adf338C40a9697780FBe55C8182f6dE0", ["0x42d28494FA5735f53AFd233358C4E494A13007b4",
+  // "0xec9af0A93b9664d5eC97F1271b11e8A3868E7FEC", 
+  // "0x82fCE39f1f2EF722D5128DfB0b8139735C7C24aC"]);
+
+  // console.log("Here now")
+  // await txSwap.wait();
+
+  // const voting = await hre.ethers.getContractAt("Voting", "0x91a4689b15b2Ca3eA3016FA3E6316A4bcD8395b6");
 
   // // await cexDeployer.grantRole(superAdmin, "0xBc61e22271fbf9f6840911a49588C95c1225cD56");
 

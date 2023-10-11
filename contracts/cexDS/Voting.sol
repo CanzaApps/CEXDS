@@ -130,11 +130,18 @@ contract Voting is AccessControl {
         emit Vote(_poolAddress, msg.sender, choice, votesForPool.length);
     }
 
-    function setVotersForPool(address[] memory _voters, address _pool) external {
-        if (msg.sender != controller) revert("Not authorized");
+    /**
+     * @notice add voters to a third-party pool, either at pool creation of after.
+     * @param voters List of voters to add to the contract.
+     * @param pool Third-party pool address on which to add the voters.
+     */
+    function setVotersForPool(address[] memory voters, address pool) external {
+        if (msg.sender != controller && !hasRole(SUPER_ADMIN, msg.sender) && !hasRole(ISwapController(controller).getPoolOwnerRole(pool), msg.sender)) revert("Not authorized");
+        if (pool == address(0)) revert("No zero address pool");
 
-        poolVoters[_pool] = _voters;
-        poolHasSpecificVoters[_pool] = true;
+        poolHasSpecificVoters[pool] = true;
+        _whiteListVoters(voters, pool);
+        
     }
 
     /**
@@ -143,17 +150,10 @@ contract Voting is AccessControl {
      */
     function whiteListVoters(
         address[] memory voters
-        ) external 
+        ) external
         onlyRole(SUPER_ADMIN) {
         
-        uint256 newVotersCount = voters.length;
-        require(voterList.length + newVotersCount <= IOracle(oracleAddress).getNumberOfVotersRequired(address(0)), "Voters added exceed allowable number of voters");
-        uint256 i;
-        while (i < newVotersCount) {
-            address voter = voters[i];
-            _addVoter(voter, address(0));
-            i++;
-        }
+        _whiteListVoters(voters, address(0));
     }
 
     /**
@@ -180,8 +180,8 @@ contract Voting is AccessControl {
         address oldVoter
         , address replacement
         , address _pool
-        ) public 
-        onlyRole(SUPER_ADMIN) {
+        ) public {
+        if (!hasRole(SUPER_ADMIN, msg.sender) && !hasRole(ISwapController(controller).getPoolOwnerRole(_pool), msg.sender)) revert("Not authorized");
 
         _removeVoter(oldVoter, _pool);
         _addVoter(replacement, _pool);
@@ -246,6 +246,24 @@ contract Voting is AccessControl {
             i++;
         }
         
+    }
+
+    function _whiteListVoters(
+        address[] memory voters
+        , address _pool
+        ) internal {
+        
+        uint256 newVotersCount = voters.length;
+
+        address[] memory previousVoters = voterList;
+        if (poolHasSpecificVoters[_pool]) previousVoters = poolVoters[_pool];
+        require(previousVoters.length + newVotersCount <= IOracle(oracleAddress).getNumberOfVotersRequired(_pool), "Voters added exceed allowable number of voters");
+        uint256 i;
+        while (i < newVotersCount) {
+            address voter = voters[i];
+            _addVoter(voter, _pool);
+            i++;
+        }
     }
 
     function _removeVoter(address _voter, address _poolAddress) private {
