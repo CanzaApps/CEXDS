@@ -43,6 +43,33 @@ contract CEXDefaultSwap {
         uint256 claimableCollateral;
     }
 
+    struct UserPoolData {
+        bool isSeller;
+        bool isBuyer;
+        SellerData sellerData;
+        BuyerData buyerData;
+    }
+
+    //Pool Data
+    struct PoolData {
+        string entityName;
+        address poolAddress;
+        string status;
+        address poolToken;
+        uint256 premium;
+        uint256 makerFee;
+        uint256 maturityDate;
+        uint256 totalVoterFeePaid;
+        uint256 depositedCollateralTotal;
+        uint256 availableCollateralTotal;
+        uint256 lockedCollateralTotal;
+        uint256 premiumPaidTotal;
+        uint256 unclaimedPremiumTotal;
+        uint256 collateralCoveredTotal;
+        uint256 claimableCollateralTotal;
+        UserPoolData userPoolData;
+    }
+
     //Mapping for Buyer Data
     mapping(address => BuyerData) public buyers;
     address[] public buyerList;
@@ -63,6 +90,7 @@ contract CEXDefaultSwap {
 
     //Pause boolean (for after default event)
     bool paused;
+    bool closed;
 
     event Deposit(address indexed _seller, uint256 _amount);
     event Withdraw(address indexed _seller, uint256 _amount);
@@ -98,10 +126,11 @@ contract CEXDefaultSwap {
 
     function deposit(uint256 _amount) external {
 
-        execute();
+        execute(false);
         
         //Don't allow deposits during Pause after default event
         require(!paused,"Contract Paused");
+        require(!closed,"Pool closed");
 
         //@DEV-TODO Include transfer from logic when ready with below
 
@@ -124,7 +153,7 @@ contract CEXDefaultSwap {
         
         //Ensures execute happens before withdraw happens if pause event not active
         if(!paused){
-            execute();
+            execute(false);
         }
         
         require(
@@ -144,7 +173,7 @@ contract CEXDefaultSwap {
 
     function purchase(uint256 _amount) external {
         
-        execute();
+        execute(false);
 
         //N.B. _amount is the amount denominated in collateral being covered. i.e. assuming a premium of 5%, a 100 input in _amount will cover 100 units of collateral and cost the buyer 5 units.
         //This is done to simplify calculations and minimize divisions
@@ -220,7 +249,7 @@ contract CEXDefaultSwap {
     function claimPremium() external {
         //Ensures execute happens before claim happens if pause event not active
         if(!paused){
-            execute();
+            execute(false);
         }
 
         uint256 payableAmount = sellers[msg.sender].unclaimedPremium;
@@ -246,15 +275,44 @@ contract CEXDefaultSwap {
 
     }
 
-    function execute() internal {
+    function execute(bool closeCall) internal {
         //Execute contract and change variable for a default event
 
         require(!paused, "Contract is paused");
 
         bool matured = block.timestamp >= maturityDate;
 
+        // triggered on a close pool action
+        if (closeCall) {
+            //Handle buyer adjustments for close pool
+            //Collateral Covered set to 0 
+            for (uint256 i = 0; i < buyerList.length; i++) {
+                address _address = buyerList[i];
+                buyers[_address].collateralCovered = 0;
+                buyers[_address].premiumPaid = 0;
+            }
+
+            collateralCovered_Total = 0;
+            premiumPaid_Total = 0;
+
+            //Handle seller adjustments for maturity
+            //All collateral made available to depositors
+            //Automatically rolled over
+            for (uint256 i = 0; i < sellerList.length; i++) {
+                address _address = sellerList[i];
+                sellers[_address].availableCollateral += 
+                   sellers[_address].lockedCollateral;
+                sellers[_address].lockedCollateral = 0;
+            }
+
+            availableCollateral_Total += lockedCollateral_Total;
+            lockedCollateral_Total = 0;
+
+            paused = true;
+            closed = true;
+
         //Triggers in default event only
-        if (defaulted) {
+        } else if (defaulted) {
             //Handle buyer adjustments for default
             //buyers can now claim their covered collateral
             //Collateral Covered set to 0 
@@ -319,7 +377,7 @@ contract CEXDefaultSwap {
 
             maturityDate += x; 
 
-            rollEpoch(maturityDate);
+            _rollEpoch(maturityDate);
         }
 
     }
@@ -333,7 +391,7 @@ contract CEXDefaultSwap {
         require(!defaulted, "Contract already defaulted");
         defaulted = true;
         paused = false;
-        execute();
+        execute(false);
     }
 
     //@TODO-Only to be handled by multisig 
@@ -345,22 +403,37 @@ contract CEXDefaultSwap {
         require(!defaulted, "Contract has defaulted, use default reset");
 
         paused = false;
-        execute();
+        execute(false);
     }
     
-    //@TODO-Only to be handled by multisig 
+    
     function resetAfterDefault(uint256 _newMaturityDate) external {
         require(msg.sender == controller, "Unauthorized");
         require(defaulted, "Not defaulted");
 
         defaulted = false;
         paused = false;
-        rollEpoch(_newMaturityDate);
+        _rollEpoch(_newMaturityDate);
 
+    }
+
+ 
+    function closePool() external {
+        require(msg.sender == controller, "Unauthorized");
+
+        execute(true);
+    }
+
+    function rollEpoch() external {
+        require(msg.sender == controller, "Unauthorized");
+        uint256 x = epochDays * 86400;
+
+        maturityDate += x; 
+        _rollEpoch(maturityDate);
     }
     
     //Epoch Vairable Handlers
-    function rollEpoch(uint256 _newMaturityDate) internal {
+    function _rollEpoch(uint256 _newMaturityDate) internal {
 
         maturityDate = _newMaturityDate;
         epoch ++;
@@ -387,6 +460,41 @@ contract CEXDefaultSwap {
 
     function isPaused() public view returns (bool) {
         return paused;
+    }
+
+    function getPoolData(address _user) public view returns (PoolData memory poolData) {
+
+        SellerData memory sellerData = sellers[_user];
+        BuyerData memory buyerData = buyers[_user];
+
+        bool isSeller = onSellerList[_user];
+        bool isBuyer = onBuyerList[_user];
+
+        UserPoolData memory userData = UserPoolData(
+            isSeller
+            , isBuyer
+            , sellerData
+            , buyerData
+        );
+
+        poolData = PoolData(
+            entityName
+            , address(this)
+            , closed ? "Closed" : defaulted ? "Defaulted" : paused ? "Paused" : "Current"
+            , address(currency)
+            , premium
+            , makerFee
+            , maturityDate
+            , totalVoterFeePaid
+            , depositedCollateral_Total
+            , availableCollateral_Total
+            , lockedCollateral_Total
+            , premiumPaid_Total
+            , unclaimedPremium_Total
+            , collateralCovered_Total
+            , claimableCollateral_Total
+            , userData
+        );
     }
 
 }

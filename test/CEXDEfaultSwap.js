@@ -18,6 +18,8 @@ let acc0;
 let acc1;
 let acc2;
 let acc3;
+let acc4;
+let acc5;
 
 contract("CEXDefaultSwap", async () => {
 
@@ -25,6 +27,28 @@ contract("CEXDefaultSwap", async () => {
 
     let swapContract;
     let poolToken;
+    let controller;
+    let oracle;
+    let [voterFeeRatio
+        , voterFeeComplementaryRatio
+        , recurringFeeRatio
+        , recurringFeeComplementaryRatio
+        , votersRequired
+        , recurringPaymentInterval] = [1, 2, 1, 3, 7, 30*24*3600];
+
+    before(async () => {
+
+        [acc0, acc1, acc2, acc3, acc4, acc5] = await ethers.getSigners();
+        controller = await (await (await ethers.getContractFactory("SwapController")).deploy(acc1.address)).deployed();
+        oracle = await (await (await ethers.getContractFactory("RateOracle")).deploy(controller.address
+            , acc1.address
+            , voterFeeRatio
+            , voterFeeComplementaryRatio
+            , recurringFeeRatio
+            , recurringFeeComplementaryRatio
+            , votersRequired
+            , recurringPaymentInterval)).deployed();
+    })
     
     
     describe("Constructor", async () => {
@@ -34,7 +58,7 @@ contract("CEXDefaultSwap", async () => {
             
 
             it("Should deploy and set global variables", async function() {
-                [acc0, acc1, acc2, acc3] = await ethers.getSigners();
+                [acc0, acc1, acc2, acc3, acc4, acc5] = await ethers.getSigners();
                 poolToken = await (await (await ethers.getContractFactory("ERC20Mock")).deploy()).deployed();
                 
 
@@ -45,7 +69,8 @@ contract("CEXDefaultSwap", async () => {
                     (PREMIUM * 10000).toString(),
                     (INIT_MATURITY_DATE).toString(),
                     (INIT_EPOCH).toString(),
-                    acc2.address // assumed voting Contract
+                    acc2.address, // assumed voting Contract
+                    oracle.address
                 )).deployed();
 
                 const entity = await swapContract.entityName();
@@ -77,7 +102,8 @@ contract("CEXDefaultSwap", async () => {
                         (PREMIUM * 10000).toString(),
                         currentTime.toString(),
                         (INIT_EPOCH).toString(),
-                        acc2.address // assumed voting Contract
+                        acc2.address, // assumed voting Contract
+                        oracle.address
                     );
     
                     await expect(swapContractDeployer).to.be.revertedWith("Invalid Maturity Date set");
@@ -98,7 +124,8 @@ contract("CEXDefaultSwap", async () => {
                     (testPremium * 10000).toString(),
                     maturityTime.toString(),
                     (INIT_EPOCH).toString(),
-                    acc2.address // assumed voting Contract
+                    acc2.address, // assumed voting Contract
+                    oracle.address
                 );
 
                 await expect(swapContractDeployer).to.be.revertedWith("Premium can not be 100% or above");
@@ -262,6 +289,106 @@ contract("CEXDefaultSwap", async () => {
             })
         })
     })
+
+    describe("Purchase", function () {
+        let makerFee;
+        let previousAvailableCollateral;
+        let previousLockedCollateral;
+        let previousSellerTokenBalance;
+        let previousContractTokenBalance;
+        let previousBuyerData;
+        let previousCollateralCovered;
+        let previousUnclaimedPremium;
+        let previousBuyerTokenBalance;
+        const purchaseAmount = 50;
+        const amtInWei = ethers.utils.parseEther(purchaseAmount.toString())
+
+        before(async () => {
+            await poolToken.mint(acc4.address, amtInWei)
+            await poolToken.connect(acc4).approve(swapContract.address, amtInWei);
+
+            previousBuyerTokenBalance = await poolToken.balanceOf(acc4.address);
+            previousContractTokenBalance = await poolToken.balanceOf(swapContract.address);
+            previousBuyerData = await swapContract.buyers(acc4.address);
+            previousAvailableCollateral = await swapContract.availableCollateral_Total();
+            previousLockedCollateral = await swapContract.lockedCollateral_Total();
+            previousCollateralCovered = await swapContract.collateralCovered_Total();
+            previousUnclaimedPremium = await swapContract.unclaimedPremium_Total();
+
+            makerFee = await swapContract.makerFee();
+        })
+
+        context("Happy path", function () {
+
+            it("should emit purchase event", async () => {
+
+                expectedPremiumPayable = purchaseAmount * PREMIUM;
+                expectedMakerFee = purchaseAmount * (+makerFee.toString())/10000;
+
+                premiumInWei = ethers.utils.parseEther(expectedPremiumPayable.toString());
+                makerFeeInWei = ethers.utils.parseEther(expectedMakerFee.toString());
+
+                const purchaseTx = swapContract.connect(acc4).purchase(amtInWei);
+
+                await expect(purchaseTx).to.emit(swapContract, "PurchaseCollateral").withArgs(acc4.address, amtInWei, premiumInWei, makerFeeInWei);
+            })
+
+            it("Should update the buyer mappings on purchase", async () => {
+
+                const finalBuyerData = await swapContract.buyers(acc4.address);
+
+                expect(await swapContract.onBuyerList(acc4.address)).to.be.true;
+
+                expectedPremiumPayable = purchaseAmount * PREMIUM;
+
+                premiumInWei = ethers.utils.parseEther(expectedPremiumPayable.toString());
+                
+                expect(+previousBuyerData.collateralCovered.toString() - (+finalBuyerData.collateralCovered.toString())).to.equal(-amtInWei.toString())
+                expect(+previousBuyerData.premiumPaid.toString() - (+finalBuyerData.premiumPaid.toString())).to.equal(-premiumInWei.toString())
+
+            })
+
+            it("Should update the global total collateral and premium data", async () => {
+                const finalAvailableCollateral = await swapContract.availableCollateral_Total();
+                const finalLockedCollateral = await swapContract.lockedCollateral_Total();
+
+                const finalCollateralCovered = await swapContract.collateralCovered_Total();
+                const finalUnclaimedPremium = await swapContract.unclaimedPremium_Total();
+
+                expect(+previousAvailableCollateral.toString() - (+finalAvailableCollateral.toString())).to.equal(+amtInWei.toString())
+                expect(+previousLockedCollateral.toString() - (+finalLockedCollateral.toString())).to.equal(-amtInWei.toString())
+
+                expectedPremiumPayable = purchaseAmount * PREMIUM;
+
+                premiumInWei = ethers.utils.parseEther(expectedPremiumPayable.toString());
+
+                expect(+previousCollateralCovered.toString() - (+finalCollateralCovered.toString())).to.equal(-amtInWei.toString())
+                expect(+previousUnclaimedPremium.toString() - (+finalUnclaimedPremium.toString())).to.equal(-premiumInWei.toString())
+
+            })
+
+            it("Should decrease token balance of buyer by expected premium plus maker fee and increase contract balance by the same", async () => {
+                
+                expectedPremiumPayable = purchaseAmount * PREMIUM;
+                expectedMakerFee = purchaseAmount * (+makerFee.toString())/10000;
+
+                premiumInWei = ethers.utils.parseEther(expectedPremiumPayable.toString());
+                makerFeeInWei = ethers.utils.parseEther(expectedMakerFee.toString());
+
+                finalBuyerTokenBalance = await poolToken.balanceOf(acc4.address);
+                finalContractTokenBalance = await poolToken.balanceOf(swapContract.address);
+
+                const expectedDiff = -premiumInWei.toString() + (-makerFeeInWei.toString());
+
+                expect(+finalBuyerTokenBalance.toString() - (+previousBuyerTokenBalance.toString())).to.equal(expectedDiff)
+                expect(+previousContractTokenBalance.toString() - (+finalContractTokenBalance.toString())).to.equal(-premiumInWei.toString())
+
+            })
+
+        })
+    })
+
+    
 
 })
 

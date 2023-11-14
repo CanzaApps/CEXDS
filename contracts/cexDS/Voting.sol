@@ -130,11 +130,20 @@ contract Voting is AccessControl {
         emit Vote(_poolAddress, msg.sender, choice, votesForPool.length);
     }
 
-    function setVotersForPool(address[] memory _voters, address _pool) external {
-        if (msg.sender != controller) revert("Not authorized");
+    /**
+     * @notice add voters to a third-party pool, either at pool creation or after.
+      Must be called by controller contract, when creating a pool, by an admin, or by the pool owner.
+      The pool owner is verified via getPoolOwnerRole
+     * @param voters List of voters to add to the contract.
+     * @param pool Third-party pool address on which to add the voters.
+     */
+    function setVotersForPool(address[] memory voters, address pool) external {
+        if (msg.sender != controller && !hasRole(SUPER_ADMIN, msg.sender) && !hasRole(ISwapController(controller).getPoolOwnerRole(pool), msg.sender)) revert("Not authorized");
+        if (pool == address(0)) revert("No zero address pool");
 
-        poolVoters[_pool] = _voters;
-        poolHasSpecificVoters[_pool] = true;
+        poolHasSpecificVoters[pool] = true;
+        _whiteListVoters(voters, pool);
+        
     }
 
     /**
@@ -143,17 +152,10 @@ contract Voting is AccessControl {
      */
     function whiteListVoters(
         address[] memory voters
-        ) external 
+        ) external
         onlyRole(SUPER_ADMIN) {
         
-        uint256 newVotersCount = voters.length;
-        require(voterList.length + newVotersCount <= IOracle(oracleAddress).getNumberOfVotersRequired(address(0)), "Voters added exceed allowable number of voters");
-        uint256 i;
-        while (i < newVotersCount) {
-            address voter = voters[i];
-            _addVoter(voter, address(0));
-            i++;
-        }
+        _whiteListVoters(voters, address(0));
     }
 
     /**
@@ -167,7 +169,7 @@ contract Voting is AccessControl {
         ) external 
         onlyRole(SUPER_ADMIN) {
         
-        replaceVoter(oldVoter, replacement, address(0));
+        replaceVoterOnPool(oldVoter, replacement, address(0));
 
     }
 
@@ -176,12 +178,12 @@ contract Voting is AccessControl {
      * @param oldVoter Voter address to be removed
      * @param replacement Voter replacement address
      */
-    function replaceVoter(
+    function replaceVoterOnPool(
         address oldVoter
         , address replacement
         , address _pool
-        ) public 
-        onlyRole(SUPER_ADMIN) {
+        ) public {
+        if (!hasRole(SUPER_ADMIN, msg.sender) && !hasRole(ISwapController(controller).getPoolOwnerRole(_pool), msg.sender)) revert("Not authorized");
 
         _removeVoter(oldVoter, _pool);
         _addVoter(replacement, _pool);
@@ -248,22 +250,55 @@ contract Voting is AccessControl {
         
     }
 
+    function _whiteListVoters(
+        address[] memory voters
+        , address _pool
+        ) internal {
+        
+        uint256 newVotersCount = voters.length;
+
+        address[] memory previousVoters = voterList;
+        if (poolHasSpecificVoters[_pool]) previousVoters = poolVoters[_pool];
+        require(previousVoters.length + newVotersCount <= IOracle(oracleAddress).getNumberOfVotersRequired(_pool), "Voters added exceed allowable number of voters");
+        uint256 i;
+        while (i < newVotersCount) {
+            address voter = voters[i];
+            if ((poolHasSpecificVoters[_pool] && isPoolVoter[_pool][voter]) || (!poolHasSpecificVoters[_pool] && hasRole(VOTER_ROLE, voter))) 
+            revert(string(
+                    abi.encodePacked(
+                        "Address ",
+                        Strings.toHexString(voter),
+                        " already has voting privileges for pool ",
+                        Strings.toHexString(_pool)
+                    )
+                ));
+            _addVoter(voter, _pool);
+            i++;
+        }
+    }
+
     function _removeVoter(address _voter, address _poolAddress) private {
 
         uint i;
         bool reachedVoter;
         address[] memory voters = voterList;
         if (poolHasSpecificVoters[_poolAddress]) voters = poolVoters[_poolAddress];
-        while (i < voters.length - 1) {
+        while (i < voters.length) {
             if (voters[i] == _voter) reachedVoter = true;
 
-            if (reachedVoter) voters[i] = voters[voters.length - 1];
+            if (reachedVoter) {
+                voters[i] = voters[voters.length - 1];
+                break;
+            }
             i++;
         }
+
+        if (!reachedVoter) revert("Address being removed is not a voter");
 
         if (poolHasSpecificVoters[_poolAddress]) {
             poolVoters[_poolAddress] = voters;
             poolVoters[_poolAddress].pop();
+            isPoolVoter[_poolAddress][_voter] = false;
         } else {
             voterList = voters;
             voterList.pop();
@@ -277,6 +312,7 @@ contract Voting is AccessControl {
     function _addVoter(address _voter, address _poolAddress) private {
         if (poolHasSpecificVoters[_poolAddress]) {
             poolVoters[_poolAddress].push(_voter);
+            isPoolVoter[_poolAddress][_voter] = true;
         } else {
             voterList.push(_voter);
             grantRole(VOTER_ROLE, _voter);

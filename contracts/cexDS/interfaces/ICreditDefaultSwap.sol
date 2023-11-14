@@ -9,4 +9,8 @@ interface ICreditDefaultSwap {
     function pause() external;
 
     function unpause() external;
+
+    function closePool() external;
+
+    function rollEpoch() external;
 }

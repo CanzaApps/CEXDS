@@ -68,20 +68,21 @@ contract SwapController is AccessControl {
 
     }
 
-    function createSwapContract(
+    function createSwapContractAsThirdParty(
         string memory _entityName,
         address _currency,
         uint256 _premium,
         uint256 _initialMaturityDate,
         uint256 _epochDays,
-        address _owner
+        address _owner,
+        address[] memory _voters
 
     ) public isAdmin {
         address poolAddress = createSwapContract(_entityName, _currency, _premium, _initialMaturityDate, _epochDays);
         bytes32 ownerRole = getPoolOwnerRole(poolAddress);
         _setRoleAdmin(ownerRole, SUPER_ADMIN);
-        grantRole(ownerRole, _owner);
-
+        _grantRole(ownerRole, _owner);
+        Voting(votingContract).setVotersForPool(_voters, poolAddress);
     }
 
     function setPoolPaused(address _add) external isSuperAdminOrPoolOwner(_add) {
@@ -95,6 +96,14 @@ contract SwapController is AccessControl {
     function resetPoolAfterDefault(address _add, uint256 _newMaturityDate) external isSuperAdminOrPoolOwner(_add) {
         ICreditDefaultSwap(_add).resetAfterDefault(_newMaturityDate);
         Voting(votingContract).clearVotingData(_add);
+    }
+
+    function closePool(address _add) external isSuperAdminOrPoolOwner(_add) {
+        ICreditDefaultSwap(_add).closePool();
+    }
+
+    function rollPoolEpoch(address _add) external isSuperAdminOrPoolOwner(_add) {
+        ICreditDefaultSwap(_add).rollEpoch();
     }
 
     function setVotingContract(address _address) external onlyRole(SUPER_ADMIN) {
