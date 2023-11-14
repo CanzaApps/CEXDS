@@ -99,31 +99,6 @@ async function main() {
 
   console.log({ totalCollateral: totalCollateral.toString(), prem: totalPremium.toString(), isPaused, defaulted })
 
-  // for (const vtr of signers.slice(4)) {
-
-  //   let bal = await mockToken.balanceOf(vtr.address);
-
-  //   console.log({ vtr: vtr.address, bal: bal.toString()})
-  // }
-
-
-  // // await cexDeployer.grantRole(superAdmin, "0xBc61e22271fbf9f6840911a49588C95c1225cD56");
-
-  // console.log("Swap Contracts are now", await cexDeployer.getSwapList());
-
-  // const mockToken = await hre.ethers.getContractAt("ERC20Mock", "0xA55046342cD3E44fAD34152A0e5771ee592D94ca");
-
-  // const poolMatureTime = Math.round(Date.now()/1000) + (10*86400);
-
-  // const cont = await hre.ethers.getContractAt("Voting", "0xb06849DC29a8565CFF104F536F6D94de6AD2Ad15");
-
-  // // // let tx = await cont.createSwapContract("Binance", "0x5bd836f690c299F8912135d36812889B6C369780", "1500", poolMatureTime.toString(), 10);
-
-  // // // await tx.wait();
-  // // // tx = await cont.createSwapContract("Canza", "0x0E57b62ABe5873c0eF25d576C3a098d872102330", "1800", poolMatureTime.toString(), 10);
-  // const tx = await cont.whiteListVoters(["0x42d28494FA5735f53AFd233358C4E494A13007b4",
-  //   "0xec9af0A93b9664d5eC97F1271b11e8A3868E7FEC", "0x82fCE39f1f2EF722D5128DfB0b8139735C7C24aC", "0xd48B7065eFd80156cE62963eF58Ae9b7f4b5f07d"])
-  // await tx.wait();
   // console.log("Swap Contracts are now", await cont.getSwapList());
 }
 

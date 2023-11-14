@@ -130,6 +130,7 @@ contract CEXDefaultSwap {
         
         //Don't allow deposits during Pause after default event
         require(!paused,"Contract Paused");
+        require(!closed,"Pool closed");
 
         //@DEV-TODO Include transfer from logic when ready with below
 

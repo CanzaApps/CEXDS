@@ -131,7 +131,9 @@ contract Voting is AccessControl {
     }
 
     /**
-     * @notice add voters to a third-party pool, either at pool creation of after.
+     * @notice add voters to a third-party pool, either at pool creation or after.
+      Must be called by controller contract, when creating a pool, by an admin, or by the pool owner.
+      The pool owner is verified via getPoolOwnerRole
      * @param voters List of voters to add to the contract.
      * @param pool Third-party pool address on which to add the voters.
      */
@@ -167,7 +169,7 @@ contract Voting is AccessControl {
         ) external 
         onlyRole(SUPER_ADMIN) {
         
-        replaceVoter(oldVoter, replacement, address(0));
+        replaceVoterOnPool(oldVoter, replacement, address(0));
 
     }
 
@@ -176,7 +178,7 @@ contract Voting is AccessControl {
      * @param oldVoter Voter address to be removed
      * @param replacement Voter replacement address
      */
-    function replaceVoter(
+    function replaceVoterOnPool(
         address oldVoter
         , address replacement
         , address _pool
@@ -261,6 +263,15 @@ contract Voting is AccessControl {
         uint256 i;
         while (i < newVotersCount) {
             address voter = voters[i];
+            if ((poolHasSpecificVoters[_pool] && isPoolVoter[_pool][voter]) || (!poolHasSpecificVoters[_pool] && hasRole(VOTER_ROLE, voter))) 
+            revert(string(
+                    abi.encodePacked(
+                        "Address ",
+                        Strings.toHexString(voter),
+                        " already has voting privileges for pool ",
+                        Strings.toHexString(_pool)
+                    )
+                ));
             _addVoter(voter, _pool);
             i++;
         }
@@ -272,16 +283,22 @@ contract Voting is AccessControl {
         bool reachedVoter;
         address[] memory voters = voterList;
         if (poolHasSpecificVoters[_poolAddress]) voters = poolVoters[_poolAddress];
-        while (i < voters.length - 1) {
+        while (i < voters.length) {
             if (voters[i] == _voter) reachedVoter = true;
 
-            if (reachedVoter) voters[i] = voters[voters.length - 1];
+            if (reachedVoter) {
+                voters[i] = voters[voters.length - 1];
+                break;
+            }
             i++;
         }
+
+        if (!reachedVoter) revert("Address being removed is not a voter");
 
         if (poolHasSpecificVoters[_poolAddress]) {
             poolVoters[_poolAddress] = voters;
             poolVoters[_poolAddress].pop();
+            isPoolVoter[_poolAddress][_voter] = false;
         } else {
             voterList = voters;
             voterList.pop();
@@ -295,6 +312,7 @@ contract Voting is AccessControl {
     function _addVoter(address _voter, address _poolAddress) private {
         if (poolHasSpecificVoters[_poolAddress]) {
             poolVoters[_poolAddress].push(_voter);
+            isPoolVoter[_poolAddress][_voter] = true;
         } else {
             voterList.push(_voter);
             grantRole(VOTER_ROLE, _voter);
