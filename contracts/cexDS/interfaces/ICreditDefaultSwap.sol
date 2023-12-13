@@ -6,6 +6,8 @@ interface ICreditDefaultSwap {
 
     function resetAfterDefault(uint256 _newMaturityDate) external;
 
+    function withdrawFromBalance(uint256 _amount, address _recipient) external;
+
     function pause() external;
 
     function unpause() external;
@@ -13,4 +15,6 @@ interface ICreditDefaultSwap {
     function closePool() external;
 
     function rollEpoch() external;
+
+    function totalVoterFeeRemaining() external view returns (uint256);
 }

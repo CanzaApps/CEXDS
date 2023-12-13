@@ -1,9 +1,12 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.18;
+pragma solidity ~0.8.18;
 
 import "./CEXDefaultSwap.sol";
 import "./SwapController.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
+import "@openzeppelin/contracts/utils/Address.sol";
 import "./interfaces/ICreditDefaultSwap.sol";
 import "./interfaces/ISwapController.sol";
 import "./interfaces/IOracle.sol";
@@ -14,6 +17,7 @@ import "./interfaces/IOracle.sol";
 * @author Ebube
 */
 contract Voting is AccessControl {
+    using SafeERC20 for IERC20;
     bytes32 public constant SUPER_ADMIN = 'SUPER_ADMIN';
     bytes32 public constant VOTER_ROLE = 'VOTER_ROLE';
 
@@ -23,23 +27,30 @@ contract Voting is AccessControl {
     }
 
     address[] public voterList;
-    uint256 public lastVoterPaymentTimestamp;
-    uint256 public totalVoterFee;
     address public controller;
     address public oracleAddress;
 
+    mapping(address => uint256) public lastVoterPaymentTimestamp;
     mapping(address => address[]) public poolVoters;
     mapping(address => mapping(address => bool)) public isPoolVoter;
-    mapping(address => VoterData[]) public poolVotes;
+    mapping(address => VoterData[]) private poolVotes;
     mapping(address => uint8) public trueVoteCount;
     mapping(address => bool) public votingState;
     mapping(address => mapping(address => bool)) public voterHasVoted;
     mapping(address => bool) public poolHasSpecificVoters;
+    // keeps track of voter replacement information to try to prevent a replacement from voting where the previous already voted
+    // maps the replacement voter to the previous voter
+    mapping(address => address) private replacementVoters;
+    // maps the pool address to the replacement voter and then to the previous voter
+    // this is specifically for 3rd party pools
+    mapping(address => mapping(address => address)) private replacementVotersPerPool;
 
-    event Vote(address indexed _pool, address _voter, bool _choice, uint256 _votePosition);
-    event PayVoters(address[] _currencies, uint256[] _amountPaidOut);
-    event AddVoter(address indexed _voter);
-    event RemoveVoter(address indexed _voter);
+    event Vote(address indexed _pool, address _voter, uint256 _votePosition);
+    event PayVoters(address[] _currencies, uint256[] _amountPaidOut, uint256 _startIndex, uint256 _endIndex);
+    event AddVoter(address indexed _voter, address _pool, address _caller);
+    event RemoveVoter(address indexed _voter, address _pool, address _caller);
+    event WithdrawReserve(address indexed _pool, uint256 reserveAmount, address _recipient, address _caller);
+    event ClearVotingData(address indexed _poolAddress, VoterData[] poolVotes, bool wasDefault);
 
     constructor(
         address secondSuperAdmin,
@@ -49,32 +60,35 @@ contract Voting is AccessControl {
         _setupRole(SUPER_ADMIN, msg.sender);
         _setupRole(SUPER_ADMIN, secondSuperAdmin);
         _setRoleAdmin(VOTER_ROLE, SUPER_ADMIN);
-        lastVoterPaymentTimestamp = block.timestamp;
         controller = controllerAddress;
         oracleAddress = oracle;
     }
 
     /**
      * @notice Pay a percentage of accumulated voter fees to each individual voter. Can only be called by address with SUPER_ADMIN role.
-     * Percentage is defined as `PERCENTAGE_VOTERS_RECURRING_FEE`, and interval must have passed `VOTER_RECURRING_PAYMENT_INTERVAL` after last payment.
+     * @dev Percentage of reserve to pay is received from Oracle.getRecurringFeeAmount 
+     * @param startIndex index within the {SwapController.swapList} from which to start the payment iteration
+     * @param endIndex index within the {SwapController.swapList} at which to start the payment iteration
      * @return pools Array containing the list of swap pools from which payment were made. Should naturally contain all pools
      * @return amountsPaidOut Array of amounts paid with indices matching index of pool in pools array from which amount was paid
      */
-    function payRecurringVoterFees() 
+    function payRecurringVoterFees(uint256 startIndex, uint256 endIndex) 
         external 
         onlyRole(SUPER_ADMIN) 
         returns (address[] memory pools, uint256[] memory amountsPaidOut) {
+        require(startIndex < endIndex, "Index Misappropriation. Start must be before end");
 
         pools = ISwapController(controller).swapList();
+        if (pools.length <= endIndex) endIndex = pools.length - 1;
         amountsPaidOut = new uint256[](pools.length);
 
-        for (uint256 i = 0; i < pools.length; i++) {
+        for (uint256 i = startIndex; i <= endIndex; i++) {
             address pool = pools[i];
-            if(block.timestamp < lastVoterPaymentTimestamp + IOracle(oracleAddress).getRecurringPaymentInterval(pool)) continue;
+            if(block.timestamp < lastVoterPaymentTimestamp[pool] + IOracle(oracleAddress).getRecurringPaymentInterval(pool)) continue;
             address[] memory votersToPay = poolVoters[pool];
             if (votersToPay.length == 0) votersToPay = voterList;
 
-            uint256 totalAmountToPay = IOracle(oracleAddress).getRecurringFeeAmount(CEXDefaultSwap(pool).totalVoterFeePaid(), pool); 
+            uint256 totalAmountToPay = IOracle(oracleAddress).getRecurringFeeAmount(CEXDefaultSwap(pool).totalVoterFeeRemaining(), pool); 
             uint256 amountPerVoter = totalAmountToPay/(votersToPay.length * 10000);
 
             CEXDefaultSwap(pool).deductFromVoterFee(totalAmountToPay/10000);
@@ -83,11 +97,12 @@ contract Voting is AccessControl {
             for (uint256 j = 0; j < votersToPay.length; j++) {
                 CEXDefaultSwap(pool).currency().transfer(votersToPay[j], amountPerVoter);
             }
+
+            lastVoterPaymentTimestamp[pool] = block.timestamp;
             
         }
-        lastVoterPaymentTimestamp = block.timestamp;
-
-        emit PayVoters(pools, amountsPaidOut);
+    
+        emit PayVoters(pools, amountsPaidOut, startIndex, endIndex);
     }
 
     /**
@@ -104,7 +119,9 @@ contract Voting is AccessControl {
         require(poolHasSpecificVoters[_poolAddress] && isPoolVoter[_poolAddress][msg.sender] || 
         (!poolHasSpecificVoters[_poolAddress] && hasRole(VOTER_ROLE, msg.sender))
         , "Not authorized to vote for this Swap");
-        require(!voterHasVoted[_poolAddress][msg.sender], "Already voted in the current cycle");
+        require(!voterHasVoted[_poolAddress][msg.sender] && !voterHasVoted[_poolAddress][replacementVoters[msg.sender]]
+        && !voterHasVoted[_poolAddress][replacementVotersPerPool[_poolAddress][msg.sender]], "Already voted in the current cycle");
+
 
         uint8 trueVotes = trueVoteCount[_poolAddress];
         if(trueVotes < 2 && choice == false) revert("Requires first 2 votes to be true");
@@ -127,7 +144,7 @@ contract Voting is AccessControl {
         }
         
 
-        emit Vote(_poolAddress, msg.sender, choice, votesForPool.length);
+        emit Vote(_poolAddress, msg.sender, votesForPool.length);
     }
 
     /**
@@ -138,7 +155,7 @@ contract Voting is AccessControl {
      * @param pool Third-party pool address on which to add the voters.
      */
     function setVotersForPool(address[] memory voters, address pool) external {
-        if (msg.sender != controller && !hasRole(SUPER_ADMIN, msg.sender) && !hasRole(ISwapController(controller).getPoolOwnerRole(pool), msg.sender)) revert("Not authorized");
+        if (msg.sender != controller && !hasRole(SUPER_ADMIN, msg.sender) && !ISwapController(controller).isPoolOwner(pool, msg.sender)) revert("Not authorized");
         if (pool == address(0)) revert("No zero address pool");
 
         poolHasSpecificVoters[pool] = true;
@@ -168,9 +185,11 @@ contract Voting is AccessControl {
         , address replacement
         ) external 
         onlyRole(SUPER_ADMIN) {
-        
-        replaceVoterOnPool(oldVoter, replacement, address(0));
 
+        _removeVoter(oldVoter, address(0));
+        _addVoter(replacement, address(0));
+
+        replacementVoters[replacement] = oldVoter;
     }
 
     /**
@@ -182,13 +201,20 @@ contract Voting is AccessControl {
         address oldVoter
         , address replacement
         , address _pool
-        ) public {
-        if (!hasRole(SUPER_ADMIN, msg.sender) && !hasRole(ISwapController(controller).getPoolOwnerRole(_pool), msg.sender)) revert("Not authorized");
+        ) external {
+        if (!hasRole(SUPER_ADMIN, msg.sender) && !ISwapController(controller).isPoolOwner(_pool, msg.sender)) revert("Not authorized");
 
         _removeVoter(oldVoter, _pool);
         _addVoter(replacement, _pool);
+
+        replacementVotersPerPool[_pool][replacement] = oldVoter;
     }
 
+    /**
+     * @notice provides a way to clear all votes data in storage for a specific pool after a default, to allow restarting a new cycle with empty mappings.
+     * Functionality is only available to the controller contract at {SwapController.resetPoolAfterDefault}
+     * @param _poolAddress the address of the swap pool whose data is to be cleared.
+     */
     function clearVotingData(address _poolAddress) external {
         if (msg.sender != controller) revert("Unauthorized.");
         uint8 voterCount = IOracle(oracleAddress).getNumberOfVotersRequired(_poolAddress);
@@ -201,10 +227,42 @@ contract Voting is AccessControl {
 
             i++;
         }
-
+        emit ClearVotingData(_poolAddress, poolVotes[_poolAddress], true);
         delete poolVotes[_poolAddress];
         delete votingState[_poolAddress];
         delete trueVoteCount[_poolAddress];
+    }
+
+    /**
+     * @notice Allows admin to withdraw any voter reserve that has not been paid yet if no default is reached in a really long time.
+     * Implementation only exists so that funds do not get locked within contract, especially if pool is closed.
+     * @param _poolAddress the swap pool for which the voter fee reserve is to be withdrawn.
+     * @param _recipient address which should receive the withdrawn reserved tokens.
+     */
+    function withdrawPendingReserve(address _poolAddress, address _recipient) external onlyRole(SUPER_ADMIN) {
+        uint256 reserveAvailable = CEXDefaultSwap(_poolAddress).totalVoterFeeRemaining();
+
+        CEXDefaultSwap(_poolAddress).currency().safeTransfer(_recipient, reserveAvailable);
+
+        CEXDefaultSwap(_poolAddress).deductFromVoterFee(reserveAvailable);
+
+        emit WithdrawReserve(_poolAddress, reserveAvailable, _recipient, msg.sender);
+    }
+
+    function setControllerContract(address _address) external onlyRole(SUPER_ADMIN) {
+        if (_address == address(0) || !_address.isContract()) revert("Attempting to set invalid address. Check that it is not zero address, and that it is for a contract");
+        if (_address == votingContract) revert("Already set");
+
+        votingContract = _address;
+        emit SetVotingContract(_address);
+    }
+
+    function setOracleContract(address _address) external onlyRole(SUPER_ADMIN) {
+        if (_address == address(0) || !_address.isContract()) revert("Attempting to set invalid address. Check that it is not zero address, and that it is for a contract");
+        if (_address == oracleContract) revert("Already set");
+
+        oracleContract = _address;
+        emit SetOracleContract(_address);
     }
 
     // Internals
@@ -223,7 +281,7 @@ contract Voting is AccessControl {
             payout = votersForTrue > voterCount/2;
         }
         
-        uint256 amountToPay = CEXDefaultSwap(_poolAddress).totalVoterFeePaid();
+        uint256 amountToPay = CEXDefaultSwap(_poolAddress).totalVoterFeeRemaining();
 
         // Reduce value of voter fee from the Pool Contract
         CEXDefaultSwap(_poolAddress).deductFromVoterFee(amountToPay);
@@ -232,15 +290,17 @@ contract Voting is AccessControl {
             ICreditDefaultSwap(_poolAddress).setDefaulted();
         } else {
             ICreditDefaultSwap(_poolAddress).unpause();
+            emit ClearVotingData(_poolAddress, poolVotes[_poolAddress], false);
             delete poolVotes[_poolAddress];
             delete votingState[_poolAddress];
             delete trueVoteCount[_poolAddress];
         } 
 
         while (i < voterCount) {
-            if (votesForPool[i].choice == payout) {
+            VoterData memory voterInfo = votesForPool[i];
+            if (voterInfo.choice == payout) {
                 // Pay only to voters who are in the rational majority
-                CEXDefaultSwap(_poolAddress).currency().transfer(votesForPool[i].voter, amountToPay/Math.max(votersForTrue, voterCount - votersForTrue));
+                CEXDefaultSwap(_poolAddress).currency().safeTransfer(voterInfo.voter, amountToPay/Math.max(votersForTrue, voterCount - votersForTrue));
             }
 
             if (!payout) delete voterHasVoted[_poolAddress][votesForPool[i].voter];
@@ -305,7 +365,7 @@ contract Voting is AccessControl {
             revokeRole(VOTER_ROLE, _voter);
         }
         
-        emit RemoveVoter(_voter);
+        emit RemoveVoter(_voter, _poolAddress, msg.sender);
 
     }
 
@@ -318,7 +378,7 @@ contract Voting is AccessControl {
             grantRole(VOTER_ROLE, _voter);
         }
         
-        emit AddVoter(_voter);
+        emit AddVoter(_voter, _poolAddress, msg.sender);
     }
 
     function getVoterList(address _poolAddress) external view returns (address[] memory) {

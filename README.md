@@ -6,7 +6,7 @@ CXDS (Centralized eXchange Default Swaps) provides credit default swaps (CDS) fo
 
 Credit Default Swaps (CDS) is a financial instrument that acts like insurance on a loan. In exchange for a premium, the buyer of a CDS can claim the collateral should the covered loan default. The seller gets exposure to yield on their collateral in exchange for taking on the risk of the loan.
 
-For more details, check our [Docs](https://victor-teixeira.gitbook.io/cxds).
+For more details, check our [Docs](https://docs.cxds.fi).
 
 ## Smart Contract Architecture
 

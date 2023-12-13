@@ -1,27 +1,33 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.18;
+pragma solidity ~0.8.18;
 
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/utils/Address.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "./Voting.sol";
 import "./interfaces/IOracle.sol";
 
+/// @title Centralized Exchange Default Swap
+/// @notice This contract implements all the functionalities for user interaction with a Credit Default Swap pool
+/// @dev Pool is deployed as a single instance representing a specific ERC20 token on a singular entity
 contract CEXDefaultSwap {
-
+    using SafeERC20 for IERC20;
+    using Address for address;
     //Loan Data
     string public entityName;
-    // Ensures a valid ERC20 compliant address is passed in constructor
-    IERC20 public currency;
-    bool public defaulted;
-    address public votingContract;
-    address public oracleContract;
-    address public controller;
+    string public entityUrl;
+    IERC20 public immutable currency;
+    address public immutable votingContract;
+    address public immutable oracleContract;
+    address public immutable controller;
     uint256 public totalVoterFeePaid;
+    uint256 public totalVoterFeeRemaining;
 
     //Epoch variables
     uint256 public epoch;
     uint256 public maturityDate;
-    uint256 public epochDays;
+    uint256 public immutable epochDays;
 
     //Seller Data
     struct SellerData {
@@ -59,7 +65,10 @@ contract CEXDefaultSwap {
         uint256 premium;
         uint256 makerFee;
         uint256 maturityDate;
+        uint256 epochCount;
+        uint256 epochDays;
         uint256 totalVoterFeePaid;
+        uint256 totalVoterFeeRemaining;
         uint256 depositedCollateralTotal;
         uint256 availableCollateralTotal;
         uint256 lockedCollateralTotal;
@@ -85,35 +94,61 @@ contract CEXDefaultSwap {
     uint256 public claimableCollateral_Total;
 
     //Premium price in bps
-    uint256 public premium;
-    uint256 public makerFee = 30;
+    uint256 public immutable premium;
+    uint256 public immutable makerFee;
+    uint256 public immutable maxSellerCount;
+    uint256 public immutable maxBuyerCount;
 
     //Pause boolean (for after default event)
-    bool paused;
-    bool closed;
+    bool private paused;
+    bool private closed;
+    bool public defaulted;
 
-    event Deposit(address indexed _seller, uint256 _amount);
-    event Withdraw(address indexed _seller, uint256 _amount);
-    event PurchaseCollateral(address indexed _buyer, uint256 _amount, uint256 premiumPaid, uint256 _makerFeePaid);
+    // _actualDepositedAmount would be less than _amount in event that the ERC20 token deposited implements fee on transfer
+    event Deposit(address indexed _seller, uint256 _amount, uint256 _actualdepositedAmount);
+    event Withdraw(address indexed _seller, uint256 _amount, uint256 _actualwithdrawAmount);
+    event PurchaseCollateral(address indexed _buyer, uint256 _amount, uint256 _actualPurchasedAmount, uint256 premiumPaid, uint256 _makerFeePaid);
     event ClaimPremium(address indexed _seller, uint256 _amount);
     event ClaimCollateral(address indexed _buyer, uint256 _amount);
+    event WithdrawFromBalance(address _recipient, uint256 _amount, uint256 _actualAmountReceived);
 
+    /// @dev Deploys contract and initializes state variables
+    /// @param _entityName the name of the specific entity which the Swap pool represents
+    /// @param _entityUrl url representing the entity which the Swap pool represents. Could be a website URL or some other URI
+    /// @param _currency the ERC20 standard token on which the pool is dependent
+    /// @param _premium the premium percentage to be paid on every collateral purchase marked up by 10**4
+    /// @param _makerFee the percentage to be paid on every purchase to amount to the treasury and voter reserve, marked up by 10**4
+    /// @param _initialMaturityDate Initial timestamp set for the swap pool to mature, in the event of no default
+    /// @param _epochDays number of days with which to update the maturity timestamp after a maturation cycle has elapsed
+    /// @param _maxSellerCount Maximum number of sellers allowed
+    /// @param _maxBuyerCount Maximum number of collateral buyers allowed
+    /// @param _votingContract address at where the contract implementing Voting consensus is deployed
+    /// @param _oracle address at where the contract providing oracle data is deployed
     constructor(
         string memory _entityName,
+        string memory _entityUrl,
         address _currency,
         uint256 _premium,
+        uint256 _makerFee,
         uint256 _initialMaturityDate,
         uint256 _epochDays,
+        uint256 _maxSellerCount,
+        uint256 _maxBuyerCount,
         address _votingContract,
         address _oracle
     ) {
+        require(_votingContract.isContract() && _oracle.isContract(), "Addresses supplied for Voting and Oracle contracts are invalid.");
         require(_initialMaturityDate > block.timestamp, "Invalid Maturity Date set");
         require(_premium < 10000, "Premium can not be 100% or above");
         currency = IERC20(_currency);
         entityName = _entityName;
+        entityUrl = _entityUrl;
         premium = _premium;
+        makerFee = _makerFee;
         maturityDate = _initialMaturityDate;
         epochDays = _epochDays;
+        maxSellerCount = _maxSellerCount;
+        maxBuyerCount = _maxBuyerCount;
         votingContract = _votingContract;
         oracleContract = _oracle;
         controller = msg.sender;
@@ -124,31 +159,38 @@ contract CEXDefaultSwap {
         _;
     }
 
+    /// @notice Allows intending seller to sell specified amount of collateral. Sellers can always add to previous sold amount.
+    /// @dev the actualTransferAmount implementation is considering the event where the ERC20 token for the pool implements fee on transfer
+    /// @param _amount intended collateral amount to sell
+    /// NOTE: The eventual deposited collateral may not match the value of _amount, if the token implements fee on transfer
     function deposit(uint256 _amount) external {
-
+        bool isPreviousSeller = onSellerList[msg.sender];
+        if (!isPreviousSeller && sellerList.length == maxSellerCount) revert("Already reached maximum allowable sellers");
         execute(false);
         
         //Don't allow deposits during Pause after default event
         require(!paused,"Contract Paused");
         require(!closed,"Pool closed");
+        
+        uint256 actualTransferAmount = _transferFrom(_amount);
+        sellers[msg.sender].depositedCollateral += actualTransferAmount;
+        sellers[msg.sender].availableCollateral += actualTransferAmount;
 
-        //@DEV-TODO Include transfer from logic when ready with below
+        depositedCollateral_Total += actualTransferAmount;
+        availableCollateral_Total += actualTransferAmount;
 
-        sellers[msg.sender].depositedCollateral += _amount;
-        sellers[msg.sender].availableCollateral += _amount;
-
-        depositedCollateral_Total += _amount;
-        availableCollateral_Total += _amount;
-
-        if (!onSellerList[msg.sender]) {
+        if (!isPreviousSeller) {
             sellerList.push(msg.sender);
             onSellerList[msg.sender] = true;
         }
-        _transferFrom(_amount);
+        
 
-        emit Deposit(msg.sender, _amount);
+        emit Deposit(msg.sender, _amount, actualTransferAmount);
     }
 
+    /// @notice Allows existing seller to withdraw collateral available to them. Locked collateral can not be withdrawn.
+    /// @dev Call to execute must be done to validate actual balances before proceeding with withdraw
+    /// @param _amount intended amount of collateral to withdraw
     function withdraw(uint256 _amount) external {
         
         //Ensures execute happens before withdraw happens if pause event not active
@@ -167,11 +209,16 @@ contract CEXDefaultSwap {
         depositedCollateral_Total -= _amount;
         availableCollateral_Total -= _amount;
 
-        _transferTo(_amount, msg.sender);
-        emit Withdraw(msg.sender, _amount);
+        uint256 actualTransferAmount = _transferTo(_amount, msg.sender);
+        emit Withdraw(msg.sender, _amount, actualTransferAmount);
     }
 
+    /// @notice Allows intending buyer to purchase a specified amount of collateral, paying a premium and protocol fee, and locking the purchased amount from the sellers.
+    /// @dev Call to execute must be done to validate actual balances before proceeding with purchase
+    /// @param _amount intended amount of collateral to purchase
     function purchase(uint256 _amount) external {
+        bool isPreviousBuyer = onBuyerList[msg.sender];
+        if (!isPreviousBuyer && buyerList.length == maxBuyerCount) revert("Already reached maximum allowable buyers");
         
         execute(false);
 
@@ -183,8 +230,6 @@ contract CEXDefaultSwap {
 
         //Don't allow deposits during Pause after default event
         require(!paused,"Contract Paused");
-
-        //@DEV-TODO does this need to be dyanmic for different dates?
         
         uint256 makerFeePayable = (_amount * makerFee) / 10000;
         
@@ -192,60 +237,74 @@ contract CEXDefaultSwap {
 
         uint256 totalPayable = makerFeePayable + premiumPayable;
 
-        _transferFrom(totalPayable);
-        uint256 voterFee = IOracle(oracleContract).getDefaultFeeAmount(makerFeePayable, address(this));
-        _transferTo(voterFee, votingContract);
-        _transferTo(makerFeePayable - voterFee, controller);
-        totalVoterFeePaid += voterFee;
+        uint256 actualTransferAmount = _transferFrom(totalPayable);
 
-        buyers[msg.sender].premiumPaid += premiumPayable;
-        buyers[msg.sender].collateralCovered += _amount;
+        //backpropagate the actualTransferAmount in the event that there was a fee on transfer, and get actual makerFeePaid & premium & collateral
+        uint256 makerFeePaid = (makerFeePayable * actualTransferAmount)/totalPayable;
+        uint256 premiumPaid = actualTransferAmount - makerFeePaid;
+
+        uint256 actualCollateralToPurchase = premiumPaid * 10000/premium;
+
+        uint256 voterFee = IOracle(oracleContract).getDefaultFeeAmount(makerFeePaid, address(this));
+        uint256 actualVotingFeeSent = _transferTo(voterFee, votingContract);
+        _transferTo(makerFeePaid - voterFee, address(this));
+        totalVoterFeePaid += actualVotingFeeSent;
+        totalVoterFeeRemaining += actualVotingFeeSent;
+
+        buyers[msg.sender].premiumPaid += premiumPaid;
+        buyers[msg.sender].collateralCovered += actualCollateralToPurchase;
 
         //For each user reduce available amount pro-rata
         //Handle reductions per user first
         //User Available Amount  =- Purchase Amount Converted to Base * User Available Amount / Total Available Amount
         //User Locked Amount =+ Changes from above
         //Unclaimed Premium =+ Premium Paid * User Available Amount / Total Available Amount
-
-        for (uint256 i = 0; i < sellerList.length; i++) {
+        uint256 sellerCount = sellerList.length;
+        for (uint256 i = 0; i < sellerCount; i++) {
             //Consider including min function to capture loop so it doesn't over subtract
 
             address _address = sellerList[i];
+            SellerData memory sellerInfo = sellers[_address];
+
+            if (sellerInfo.availableCollateral == 0) continue;
 
             //Calculate change in collateral
-            uint256 w = (_amount *
-                sellers[_address].availableCollateral *
+            uint256 w = (actualCollateralToPurchase *
+                sellerInfo.availableCollateral *
                 1e18) / availableCollateral_Total;
 
             //Add premium to claimable amount
-            uint256 z = (premiumPayable *
-                sellers[_address].availableCollateral *
+            uint256 z = (premiumPaid *
+                sellerInfo.availableCollateral *
                 1e18) / availableCollateral_Total;
 
-            sellers[_address].availableCollateral = (sellers[_address].availableCollateral*1e18 - w)/1e18;
-            sellers[_address].lockedCollateral = (sellers[_address].lockedCollateral*1e18 + w)/1e18;
-            sellers[_address].unclaimedPremium = (sellers[_address].unclaimedPremium*1e18 + z)/1e18;
+            sellerInfo.availableCollateral = (sellerInfo.availableCollateral*1e18 - w)/1e18;
+            sellerInfo.lockedCollateral = (sellerInfo.lockedCollateral*1e18 + w)/1e18;
+            sellerInfo.unclaimedPremium = (sellerInfo.unclaimedPremium*1e18 + z)/1e18;
+
+            sellers[_address] = sellerInfo;
         }
 
         //Handle global amounts
         //Available Total =- Amount purchased converted to base
         //Locked amount =+ change from above
 
-        availableCollateral_Total -= _amount;
-        lockedCollateral_Total += _amount;
+        availableCollateral_Total -= actualCollateralToPurchase;
+        lockedCollateral_Total += actualCollateralToPurchase;
 
-        premiumPaid_Total += premiumPayable;
-        unclaimedPremium_Total += premiumPayable;
-        collateralCovered_Total += _amount;
+        premiumPaid_Total += premiumPaid;
+        unclaimedPremium_Total += premiumPaid;
+        collateralCovered_Total += actualCollateralToPurchase;
 
-        if (!onBuyerList[msg.sender]) {
+        if (!isPreviousBuyer) {
             buyerList.push(msg.sender);
             onBuyerList[msg.sender] = true;
         }
 
-        emit PurchaseCollateral(msg.sender, _amount, premiumPayable, makerFeePayable);
+        emit PurchaseCollateral(msg.sender, _amount, actualCollateralToPurchase, premiumPaid, makerFeePaid);
     }
 
+    /// @notice Allows existing seller to claim premium previously paid by buyers on purchase
     function claimPremium() external {
         //Ensures execute happens before claim happens if pause event not active
         if(!paused){
@@ -262,9 +321,8 @@ contract CEXDefaultSwap {
         emit ClaimPremium(msg.sender, payableAmount);
     }
 
+    /// @notice Allows existing buyer to claim collateral locked in the event of a default
     function claimCollateral() external {
-        //@DEV TODO Call Oracle
-
         uint256 payableAmount = buyers[msg.sender].claimableCollateral;
 
         buyers[msg.sender].claimableCollateral = 0;
@@ -281,12 +339,14 @@ contract CEXDefaultSwap {
         require(!paused, "Contract is paused");
 
         bool matured = block.timestamp >= maturityDate;
+        uint256 buyerCount = buyerList.length;
+        uint256 sellerCount = sellerList.length;
 
         // triggered on a close pool action
         if (closeCall) {
             //Handle buyer adjustments for close pool
             //Collateral Covered set to 0 
-            for (uint256 i = 0; i < buyerList.length; i++) {
+            for (uint256 i = 0; i < buyerCount; i++) {
                 address _address = buyerList[i];
                 buyers[_address].collateralCovered = 0;
                 buyers[_address].premiumPaid = 0;
@@ -298,7 +358,7 @@ contract CEXDefaultSwap {
             //Handle seller adjustments for maturity
             //All collateral made available to depositors
             //Automatically rolled over
-            for (uint256 i = 0; i < sellerList.length; i++) {
+            for (uint256 i = 0; i < sellerCount; i++) {
                 address _address = sellerList[i];
                 sellers[_address].availableCollateral += 
                    sellers[_address].lockedCollateral;
@@ -318,10 +378,10 @@ contract CEXDefaultSwap {
             //Collateral Covered set to 0 
 
 
-            for (uint256 i = 0; i < buyerList.length; i++) {
+            for (uint256 i = 0; i < buyerCount; i++) {
                 address _address = buyerList[i];
             
-                buyers[_address].claimableCollateral = buyers[_address]
+                buyers[_address].claimableCollateral += buyers[_address]
                     .collateralCovered;
                 buyers[_address].collateralCovered = 0;
             }
@@ -334,7 +394,7 @@ contract CEXDefaultSwap {
             //Deposited collateral reduced for locked collateral
             //Available collateral is rolled forward for next epoch
             //user can still withdraw even when paused.
-            for (uint256 i = 0; i < sellerList.length; i++) {
+            for (uint256 i = 0; i < sellerCount; i++) {
                 address _address = sellerList[i];
                 sellers[_address].depositedCollateral -= sellers[_address].lockedCollateral; 
                 sellers[_address].lockedCollateral = 0;
@@ -351,7 +411,7 @@ contract CEXDefaultSwap {
             //Handle buyer adjustments for maturity
             //Covered collateral reset to 0
             //Premium paid reset to 0 
-            for (uint256 i = 0; i < buyerList.length; i++) {
+            for (uint256 i = 0; i < buyerCount; i++) {
                 address _address = buyerList[i];
                 buyers[_address].collateralCovered = 0;
                 buyers[_address].premiumPaid = 0;
@@ -363,7 +423,7 @@ contract CEXDefaultSwap {
             //Handle seller adjustments for maturity
             //All collateral made available to depositors
             //Automatically rolled over
-            for (uint256 i = 0; i < sellerList.length; i++) {
+            for (uint256 i = 0; i < sellerCount; i++) {
                 address _address = sellerList[i];
                 sellers[_address].availableCollateral += 
                    sellers[_address].lockedCollateral;
@@ -382,12 +442,21 @@ contract CEXDefaultSwap {
 
     }
 
-    function deductFromVoterFee(uint256 _amount) external validCaller {
-        if (_amount > totalVoterFeePaid) revert("Not sufficient deductible");
-        totalVoterFeePaid -= _amount;
+    function deductFromVoterFee(uint256 _amount) external {
+        if(msg.sender != votingContract) revert("Unauthorized");
+        if (_amount > totalVoterFeeRemaining) revert("Not sufficient deductible");
+        totalVoterFeeRemaining -= _amount;
     }
 
-    function setDefaulted() external validCaller {
+    function withdrawFromBalance(uint256 _amount, address _recipient) external {
+        if(msg.sender != controller) revert("Unauthorized");
+
+        uint256 actualAmountSent = _transferTo(_amount, _recipient);
+        emit WithdrawFromBalance(_recipient, _amount, actualAmountSent);
+    }
+
+    function setDefaulted() external {
+        if(msg.sender != votingContract) revert("Unauthorized");
         require(!defaulted, "Contract already defaulted");
         defaulted = true;
         paused = false;
@@ -426,10 +495,8 @@ contract CEXDefaultSwap {
 
     function rollEpoch() external {
         require(msg.sender == controller, "Unauthorized");
-        uint256 x = epochDays * 86400;
-
-        maturityDate += x; 
-        _rollEpoch(maturityDate);
+        require(block.timestamp >= maturityDate, "Maturity Date not yet reached");
+        execute(false);
     }
     
     //Epoch Vairable Handlers
@@ -441,21 +508,25 @@ contract CEXDefaultSwap {
     }
     
 
-    function _transferFrom(uint256 _amount) internal {
+    function _transferFrom(uint256 _amount) internal returns (uint256 actualTransferAmount) {
+        uint256 previousBalanceOfContract = currency.balanceOf(address(this));
 
-        bool transferSuccess = currency.transferFrom(
+        currency.safeTransferFrom(
             msg.sender,
             address(this),
             _amount
         );
 
-        if (!transferSuccess) revert();
+        uint256 finalBalanceOfContract = currency.balanceOf(address(this));
+        actualTransferAmount = finalBalanceOfContract - previousBalanceOfContract;
     }
 
-    function _transferTo(uint256 _amount, address _user) internal {
-        bool transferSuccess = currency.transfer(_user, _amount);
+    function _transferTo(uint256 _amount, address _user) internal returns (uint256 actualTransferAmount) {
+        uint256 previousBalanceOfReceiver = currency.balanceOf(_user);
+        currency.safeTransfer(_user, _amount);
 
-        if (!transferSuccess) revert();
+        uint256 finalBalanceOfReceiver = currency.balanceOf(_user);
+        actualTransferAmount = finalBalanceOfReceiver - previousBalanceOfReceiver;
     }
 
     function isPaused() public view returns (bool) {
@@ -485,7 +556,10 @@ contract CEXDefaultSwap {
             , premium
             , makerFee
             , maturityDate
+            , epoch
+            , epochDays
             , totalVoterFeePaid
+            , totalVoterFeeRemaining
             , depositedCollateral_Total
             , availableCollateral_Total
             , lockedCollateral_Total

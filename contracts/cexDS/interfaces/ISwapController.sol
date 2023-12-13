@@ -9,4 +9,6 @@ interface ISwapController {
     function PERCENTAGE_VOTERS_DEFAULT_FEE() external view returns (uint256);
 
     function getPoolOwnerRole(address _poolAddress) external pure returns (bytes32 ownerRole);
+
+    function isPoolOwner(address _poolAddress, address _user) external view returns (bool);
 }
