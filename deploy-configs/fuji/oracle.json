@@ -1,9 +1,0 @@
-{
-    "secondSuperAdmin": "",
-    "voterFeeRatio": 1,
-    "voterFeeComplementaryRatio": 2,
-    "recurringFeeRatio": 1,
-    "recurringFeeComplementaryRatio": 3,
-    "votersRequired": 7,
-    "recurringPaymentInterval": 604800
-}

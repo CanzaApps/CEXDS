@@ -14,12 +14,14 @@ async function getConfiguration(contract) {
 
   const config = require(`../deploy-configs/${networkName}/${contract.toLowerCase()}.json`)
   let allPools = []
-  if (contract === "cexdefaultswap.json") {
+  if (contract === "cexdefaultswap") {
     const ownedSwapConfigs = config.ownedSwaps
     for (const conf of ownedSwapConfigs) {
 
-      if (!conf.entityName || !conf.entityUrl || !conf.initialMaturityTimestamp || !conf.initialEpochDays) 
-      throw new Error("Requires fields in configs to be set")
+      if (!conf.entityName || !conf.entityUrl || !conf.initialEpochDays) 
+      throw new Error("Requires fields in configs to be set");
+
+      conf.initialMaturityTimestamp = conf.initialMaturityTimestamp || Math.round(Date.now()/1000) + 604800;
 
       if (!conf.tokenAddress) {
         conf.tokenAddress = (await (await (await ethers.getContractFactory("ERC20Mock")).deploy()).deployed()).address;
@@ -31,8 +33,10 @@ async function getConfiguration(contract) {
     const thirdPartySwapConfigs = config.thirdPartySwaps;
     for (const conf of thirdPartySwapConfigs) {
 
-      if (!conf.entityName || !conf.entityUrl || !conf.initialMaturityTimestamp || !conf.initialEpochDays || !conf.owner) 
+      if (!conf.entityName || !conf.entityUrl || !conf.initialEpochDays || !conf.owner) 
       throw new Error("Requires fields in configs to be set");
+
+      conf.initialMaturityTimestamp = conf.initialMaturityTimestamp || Math.round(Date.now()/1000) + 604800;
 
       if (!conf.tokenAddress) {
         conf.tokenAddress = (await (await (await ethers.getContractFactory("ERC20Mock")).deploy()).deployed()).address;
@@ -93,7 +97,8 @@ async function main() {
   const oracleConfig = await getConfiguration("oracle");
 
   const Oracle = await hre.ethers.getContractFactory("RateOracle");
-  const oracle = await Oracle.deploy(oracleConfig.secondSuperAdmin
+  const oracle = await Oracle.deploy(cexDeployer.address
+    , oracleConfig.secondSuperAdmin
     , oracleConfig.voterFeeRatio
     , oracleConfig.voterFeeComplementaryRatio
     , oracleConfig.recurringFeeRatio
@@ -113,7 +118,7 @@ async function main() {
   await voting.deployed();
   console.log("Voting deployed to ", voting.address);
 
-  const whitelistTx = await voting.whiteListVoters(config.universalVoters);
+  const whitelistTx = await voting.whiteListVoters(votingConfig.universalVoters);
   await whitelistTx.wait();
 
   // Add Voting Contract to controller
