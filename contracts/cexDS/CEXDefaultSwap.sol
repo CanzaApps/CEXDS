@@ -101,15 +101,18 @@ contract CEXDefaultSwap {
 
     //Pause boolean (for after default event)
     bool private paused;
-    bool private closed;
+    bool public closed;
     bool public defaulted;
+
+    //Stores all token Values sent to the contract
+    mapping(address => uint256) public fallBackEntries;
 
     // _actualDepositedAmount would be less than _amount in event that the ERC20 token deposited implements fee on transfer
     event Deposit(address indexed _seller, uint256 _amount, uint256 _actualdepositedAmount);
     event Withdraw(address indexed _seller, uint256 _amount, uint256 _actualwithdrawAmount);
     event PurchaseCollateral(address indexed _buyer, uint256 _amount, uint256 _actualPurchasedAmount, uint256 premiumPaid, uint256 _makerFeePaid);
-    event ClaimPremium(address indexed _seller, uint256 _amount);
-    event ClaimCollateral(address indexed _buyer, uint256 _amount);
+    event ClaimPremium(address indexed _seller, uint256 _amount, uint256 _actualTransferAmount);
+    event ClaimCollateral(address indexed _buyer, uint256 _amount, uint256 _actualPurchasedAmount);
     event WithdrawFromBalance(address _recipient, uint256 _amount, uint256 _actualAmountReceived);
 
     /// @dev Deploys contract and initializes state variables
@@ -137,9 +140,9 @@ contract CEXDefaultSwap {
         address _votingContract,
         address _oracle
     ) {
-        require(_votingContract.isContract() && _oracle.isContract(), "Addresses supplied for Voting and Oracle contracts are invalid.");
+        require(_votingContract.isContract() && _oracle.isContract(), "Address supplied for Voting, or Oracle, contract is invalid");
         require(_initialMaturityDate > block.timestamp, "Invalid Maturity Date set");
-        require(_premium < 10000, "Premium can not be 100% or above");
+        require(_premium < 10000 && _makerFee < 10000, "Premium, and maker fee, can not be 100% or above");
         currency = IERC20(_currency);
         entityName = _entityName;
         entityUrl = _entityUrl;
@@ -230,6 +233,7 @@ contract CEXDefaultSwap {
 
         //Don't allow deposits during Pause after default event
         require(!paused,"Contract Paused");
+        require(!closed,"Pool closed");
         
         uint256 makerFeePayable = (_amount * makerFee) / 10000;
         
@@ -247,7 +251,6 @@ contract CEXDefaultSwap {
 
         uint256 voterFee = IOracle(oracleContract).getDefaultFeeAmount(makerFeePaid, address(this));
         uint256 actualVotingFeeSent = _transferTo(voterFee, votingContract);
-        _transferTo(makerFeePaid - voterFee, address(this));
         totalVoterFeePaid += actualVotingFeeSent;
         totalVoterFeeRemaining += actualVotingFeeSent;
 
@@ -317,8 +320,8 @@ contract CEXDefaultSwap {
 
         unclaimedPremium_Total -= payableAmount;
 
-        _transferTo(payableAmount, msg.sender);
-        emit ClaimPremium(msg.sender, payableAmount);
+        uint256 actualTransfer = _transferTo(payableAmount, msg.sender);
+        emit ClaimPremium(msg.sender, payableAmount, actualTransfer);
     }
 
     /// @notice Allows existing buyer to claim collateral locked in the event of a default
@@ -328,8 +331,8 @@ contract CEXDefaultSwap {
         buyers[msg.sender].claimableCollateral = 0;
 
         claimableCollateral_Total -= payableAmount;
-        _transferTo(payableAmount, msg.sender);
-        emit ClaimCollateral(msg.sender, payableAmount);
+        uint256 actualTransfer = _transferTo(payableAmount, msg.sender);
+        emit ClaimCollateral(msg.sender, payableAmount, actualTransfer);
 
     }
 
@@ -349,11 +352,9 @@ contract CEXDefaultSwap {
             for (uint256 i = 0; i < buyerCount; i++) {
                 address _address = buyerList[i];
                 buyers[_address].collateralCovered = 0;
-                buyers[_address].premiumPaid = 0;
             }
 
             collateralCovered_Total = 0;
-            premiumPaid_Total = 0;
 
             //Handle seller adjustments for maturity
             //All collateral made available to depositors
@@ -442,12 +443,18 @@ contract CEXDefaultSwap {
 
     }
 
-    function deductFromVoterFee(uint256 _amount) external {
+    /// @notice Provides a means to maintain running voter reserve balance when paying voter fees on the voting contract
+    /// @dev Should ensure every call from {Voting} reverts if it tries to pay out more than the reserve amount left.
+    /// @param _amount intended amount to deduct from the reserve
+    function deductFromVoterReserve(uint256 _amount) external {
         if(msg.sender != votingContract) revert("Unauthorized");
         if (_amount > totalVoterFeeRemaining) revert("Not sufficient deductible");
         totalVoterFeeRemaining -= _amount;
     }
 
+    /// @notice Withdraw from the treasury rewards reserve paid at purchases
+    /// @param _amount intended amount to deduct from the reserve
+    /// @param _recipient address to which the withdrawn amount should be sent
     function withdrawFromBalance(uint256 _amount, address _recipient) external {
         if(msg.sender != controller) revert("Unauthorized");
 
@@ -463,7 +470,6 @@ contract CEXDefaultSwap {
         execute(false);
     }
 
-    //@TODO-Only to be handled by multisig 
     function pause() external validCaller {
         paused = true;
     }
@@ -486,7 +492,7 @@ contract CEXDefaultSwap {
 
     }
 
- 
+    /// @notice Close a pool to not be used anymore, refunding all locked collaterals to the sellers to be withdrawn
     function closePool() external {
         require(msg.sender == controller, "Unauthorized");
 

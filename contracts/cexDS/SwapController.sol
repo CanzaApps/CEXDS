@@ -36,11 +36,15 @@ contract SwapController is AccessControl {
 
     constructor(
         address secondSuperAdmin
+        , uint256 _maxNumberOfSellersPerPool
+        , uint256 _maxNumberOfBuyersPerPool
     ) {
         if (secondSuperAdmin == address(0)) revert("Attempting to set zero address as admin");
         _setupRole(SUPER_ADMIN, msg.sender);
         _setupRole(SUPER_ADMIN, secondSuperAdmin);
         _setRoleAdmin(ADMIN_CONTROLLER, SUPER_ADMIN);
+        maxNumberOfBuyersPerPool = _maxNumberOfBuyersPerPool;
+        maxNumberOfSellersPerPool = _maxNumberOfSellersPerPool;
     }
 
     modifier isAdmin() {
@@ -155,7 +159,7 @@ contract SwapController is AccessControl {
     }
 
     function setVotingContract(address _address) external onlyRole(SUPER_ADMIN) {
-        if (_address == address(0) || !_address.isContract()) revert("Attempting to set invalid address. Check that it is not zero address, and that it is for a contract");
+        if (!_address.isContract()) revert("Attempting to set invalid address. Check that it is not zero address, and that it is for a contract");
         if (_address == votingContract) revert("Already set");
 
         votingContract = _address;
@@ -163,7 +167,7 @@ contract SwapController is AccessControl {
     }
 
     function setOracleContract(address _address) external onlyRole(SUPER_ADMIN) {
-        if (_address == address(0) || !_address.isContract()) revert("Attempting to set invalid address. Check that it is not zero address, and that it is for a contract");
+        if (!_address.isContract()) revert("Attempting to set invalid address. Check that it is not zero address, and that it is for a contract");
         if (_address == oracleContract) revert("Already set");
 
         oracleContract = _address;

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ~0.8.18;
+pragma solidity ^0.8.6;
 
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
@@ -8,7 +8,7 @@ import "./interfaces/ISwapController.sol";
 contract RateOracle is AccessControl {
 
     bytes32 public constant SUPER_ADMIN = 'SUPER_ADMIN';
-    uint256 public voterRecurringPaymentInterval;
+    uint256 public votersRecurringPaymentInterval;
     uint8 public votersDefaultFeeRatio;
     uint8 public votersDefaultFeeComplementaryRatio;
     uint8 public votersRecurringFeeRatio;
@@ -25,9 +25,9 @@ contract RateOracle is AccessControl {
         uint8 complementaryRatio;
     }
 
-    mapping(address => uint256) paymentIntervalOverride;
+    mapping(address => uint256) public paymentIntervalOverride;
     mapping(address => FeeRatioOverride) public voterFeeRatioOverride;
-    mapping(address => FeeRatioOverride) recurringFeeRatioOverride;
+    mapping(address => FeeRatioOverride) public recurringFeeRatioOverride;
 
     event SetNumberOfVoters(uint8 _value);
     event SetPaymentInterval(uint256 _value);
@@ -52,7 +52,7 @@ contract RateOracle is AccessControl {
         _setupRole(SUPER_ADMIN, secondSuperAdmin);
         controllerAddress = controller;
 
-        voterRecurringPaymentInterval = recurringPaymentInterval;
+        votersRecurringPaymentInterval = recurringPaymentInterval;
         votersDefaultFeeRatio = _voterFeeRatio;
         votersDefaultFeeComplementaryRatio = _voterFeeComplementaryRatio;
         votersRecurringFeeRatio = _recurringFeeRatio;
@@ -77,7 +77,7 @@ contract RateOracle is AccessControl {
         uint8 _newVoterFeeRatio
         , uint8 _newVoterFeeComplementaryRatio
     ) external onlyRole(SUPER_ADMIN) {
-        require(_newVoterFeeRatio *10000/_newVoterFeeComplementaryRatio <= maxFeeRate, "RateOracle: Fee rate specified too high");
+        require(uint256(_newVoterFeeRatio) *10000/(_newVoterFeeRatio + _newVoterFeeComplementaryRatio) <= maxFeeRate, "RateOracle: Fee rate specified too high");
         votersDefaultFeeRatio = _newVoterFeeRatio;
         votersDefaultFeeComplementaryRatio = _newVoterFeeComplementaryRatio;
         emit SetDefaultFeeRatio(_newVoterFeeRatio, _newVoterFeeComplementaryRatio);
@@ -94,7 +94,7 @@ contract RateOracle is AccessControl {
         , uint8 _newVoterFeeComplementaryRatio
         , address _poolAddress
     ) external isSuperAdminOrPoolOwner(_poolAddress) {
-        require(_newVoterFeeRatio *10000/_newVoterFeeComplementaryRatio <= maxFeeRate, "RateOracle: Fee rate specified too high");
+        require(uint256(_newVoterFeeRatio) *10000/(_newVoterFeeRatio + _newVoterFeeComplementaryRatio) <= maxFeeRate, "RateOracle: Fee rate specified too high");
         voterFeeRatioOverride[_poolAddress] = FeeRatioOverride(_newVoterFeeRatio, _newVoterFeeComplementaryRatio);
         emit SetDefaultFeeRatioOverride(_poolAddress, _newVoterFeeRatio, _newVoterFeeComplementaryRatio, msg.sender);
     }
@@ -106,7 +106,7 @@ contract RateOracle is AccessControl {
     function setVotersPaymentInterval(
         uint256 _newInterval
     ) external onlyRole(SUPER_ADMIN) {
-        voterRecurringPaymentInterval = _newInterval;
+        votersRecurringPaymentInterval = _newInterval;
         emit SetPaymentInterval(_newInterval);
     }
 
@@ -133,7 +133,7 @@ contract RateOracle is AccessControl {
         uint8 _newRecurringFeeRatio
         , uint8 _newRecurringFeeComplementaryRatio
     ) external onlyRole(SUPER_ADMIN) {
-        require(_newRecurringFeeRatio *10000/_newRecurringFeeComplementaryRatio <= maxFeeRate, "RateOracle: Fee rate specified too high");
+        require(uint256(_newRecurringFeeRatio) *10000/(_newRecurringFeeRatio + _newRecurringFeeComplementaryRatio) <= maxFeeRate, "RateOracle: Fee rate specified too high");
         votersRecurringFeeRatio = _newRecurringFeeRatio;
         votersRecurringFeeComplementaryRatio = _newRecurringFeeComplementaryRatio;
         emit SetRecurringFeeRatio(_newRecurringFeeRatio, _newRecurringFeeComplementaryRatio);
@@ -150,7 +150,7 @@ contract RateOracle is AccessControl {
         , uint8 _newRecurringFeeComplementaryRatio
         , address _poolAddress
     ) external isSuperAdminOrPoolOwner(_poolAddress) {
-        require(_newRecurringFeeRatio *10000/_newRecurringFeeComplementaryRatio <= maxFeeRate, "RateOracle: Fee rate specified too high");
+        require(uint256(_newRecurringFeeRatio) *10000/(_newRecurringFeeRatio + _newRecurringFeeComplementaryRatio) <= maxFeeRate, "RateOracle: Fee rate specified too high");
         recurringFeeRatioOverride[_poolAddress] = FeeRatioOverride(_newRecurringFeeRatio, _newRecurringFeeComplementaryRatio);
         emit SetRecurringFeeRatioOverride(_poolAddress, _newRecurringFeeRatio, _newRecurringFeeComplementaryRatio, msg.sender);
     }
@@ -193,7 +193,7 @@ contract RateOracle is AccessControl {
 
     function getRecurringPaymentInterval(address _pool) public view returns (uint256 count) {
         uint256 _override = paymentIntervalOverride[_pool];
-        count = _override == 0 ? voterRecurringPaymentInterval : _override;
+        count = _override == 0 ? votersRecurringPaymentInterval : _override;
     }
 
 

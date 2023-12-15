@@ -17,6 +17,7 @@ import "./interfaces/IOracle.sol";
 * @author Ebube
 */
 contract Voting is AccessControl {
+    using Address for address;
     using SafeERC20 for IERC20;
     bytes32 public constant SUPER_ADMIN = 'SUPER_ADMIN';
     bytes32 public constant VOTER_ROLE = 'VOTER_ROLE';
@@ -51,6 +52,8 @@ contract Voting is AccessControl {
     event RemoveVoter(address indexed _voter, address _pool, address _caller);
     event WithdrawReserve(address indexed _pool, uint256 reserveAmount, address _recipient, address _caller);
     event ClearVotingData(address indexed _poolAddress, VoterData[] poolVotes, bool wasDefault);
+    event SetController(address _controllerAddress);
+    event SetOracle(address _oracleAddress);
 
     constructor(
         address secondSuperAdmin,
@@ -78,7 +81,7 @@ contract Voting is AccessControl {
         returns (address[] memory pools, uint256[] memory amountsPaidOut) {
         require(startIndex < endIndex, "Index Misappropriation. Start must be before end");
 
-        pools = ISwapController(controller).swapList();
+        pools = ISwapController(controller).getSwapList();
         if (pools.length <= endIndex) endIndex = pools.length - 1;
         amountsPaidOut = new uint256[](pools.length);
 
@@ -91,11 +94,11 @@ contract Voting is AccessControl {
             uint256 totalAmountToPay = IOracle(oracleAddress).getRecurringFeeAmount(CEXDefaultSwap(pool).totalVoterFeeRemaining(), pool); 
             uint256 amountPerVoter = totalAmountToPay/(votersToPay.length * 10000);
 
-            CEXDefaultSwap(pool).deductFromVoterFee(totalAmountToPay/10000);
+            CEXDefaultSwap(pool).deductFromVoterReserve(totalAmountToPay/10000);
             amountsPaidOut[i] = totalAmountToPay/10000;
 
             for (uint256 j = 0; j < votersToPay.length; j++) {
-                CEXDefaultSwap(pool).currency().transfer(votersToPay[j], amountPerVoter);
+                CEXDefaultSwap(pool).currency().safeTransfer(votersToPay[j], amountPerVoter);
             }
 
             lastVoterPaymentTimestamp[pool] = block.timestamp;
@@ -244,25 +247,25 @@ contract Voting is AccessControl {
 
         CEXDefaultSwap(_poolAddress).currency().safeTransfer(_recipient, reserveAvailable);
 
-        CEXDefaultSwap(_poolAddress).deductFromVoterFee(reserveAvailable);
+        CEXDefaultSwap(_poolAddress).deductFromVoterReserve(reserveAvailable);
 
         emit WithdrawReserve(_poolAddress, reserveAvailable, _recipient, msg.sender);
     }
 
     function setControllerContract(address _address) external onlyRole(SUPER_ADMIN) {
-        if (_address == address(0) || !_address.isContract()) revert("Attempting to set invalid address. Check that it is not zero address, and that it is for a contract");
-        if (_address == votingContract) revert("Already set");
+        if (!_address.isContract()) revert("Attempting to set invalid address. Check that it is not zero address, and that it is for a contract");
+        if (_address == controller) revert("Already set");
 
-        votingContract = _address;
-        emit SetVotingContract(_address);
+        controller = _address;
+        emit SetController(_address);
     }
 
     function setOracleContract(address _address) external onlyRole(SUPER_ADMIN) {
-        if (_address == address(0) || !_address.isContract()) revert("Attempting to set invalid address. Check that it is not zero address, and that it is for a contract");
-        if (_address == oracleContract) revert("Already set");
+        if (!_address.isContract()) revert("Attempting to set invalid address. Check that it is not zero address, and that it is for a contract");
+        if (_address == oracleAddress) revert("Already set");
 
-        oracleContract = _address;
-        emit SetOracleContract(_address);
+        oracleAddress = _address;
+        emit SetOracle(_address);
     }
 
     // Internals
@@ -284,7 +287,7 @@ contract Voting is AccessControl {
         uint256 amountToPay = CEXDefaultSwap(_poolAddress).totalVoterFeeRemaining();
 
         // Reduce value of voter fee from the Pool Contract
-        CEXDefaultSwap(_poolAddress).deductFromVoterFee(amountToPay);
+        CEXDefaultSwap(_poolAddress).deductFromVoterReserve(amountToPay);
 
         if (payout) {
             ICreditDefaultSwap(_poolAddress).setDefaulted();
