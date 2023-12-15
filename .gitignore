@@ -12,3 +12,6 @@ artifacts
 
 scripts/newdep.js
 scripts/runs.js
+
+deploy-configs/*/*
+deployments/*

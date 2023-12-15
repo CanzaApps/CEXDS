@@ -6,7 +6,7 @@ CXDS (Centralized eXchange Default Swaps) provides credit default swaps (CDS) fo
 
 Credit Default Swaps (CDS) is a financial instrument that acts like insurance on a loan. In exchange for a premium, the buyer of a CDS can claim the collateral should the covered loan default. The seller gets exposure to yield on their collateral in exchange for taking on the risk of the loan.
 
-For more details, check our [Docs](https://victor-teixeira.gitbook.io/cxds).
+For more details, check our [Docs](https://docs.cxds.fi).
 
 ## Smart Contract Architecture
 
@@ -20,6 +20,13 @@ The Smart Contract Implementation is basically based on 4 key contracts, with fu
 
 - RateOracle - Provides interface for rate computations and other required variables.
 
+## Technical Requirements
+
+- YARN
+- Solidity ~0.8.0
+- Openzeppelin Contracts (AccessControl, SafeERC20, ERC20, Address)
+- Hardhat
+
 ## Getting Started
 
 Get a workaround with a simple local test.
@@ -31,9 +38,15 @@ yarn install
 npx hardhat test
 ```
 
-Deploy smart contract
+## Deployments
+
+To deploy, the configurations for each contract would need to be set at deploy-configs/[<NETWORK>]/. Some of these configurations are mandatory and deployment would fail without them in place.
+
+After updating configs, run the following
 
 ```shell
 export PRIVATE_KEY=[<WALLET_PRIVATE_KEY>]
 npx hardhat run scripts/deploy.js --network [<TESTNET_NAME>]
 ```
+
+Deployment outputs can be found in deployments/[<NETWORK>].json

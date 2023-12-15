@@ -6,13 +6,18 @@ const {
 const { expect } = require("chai");
 const BigNumber = require("bignumber.js");
 const { ethers, assert, network } = require("hardhat");
-const fs = require('fs');
+const { start } = require("repl");
 
 const PREMIUM = 0.1; // Fractional premium
+const MAKER_FEE = 0.03;
 const INIT_EPOCH = 2;
-const INIT_MATURITY_DATE = Math.round(Date.now()/1000) + 86400;
+const INIT_MATURITY_DATE = Math.round(Date.now()/1000) + (86400 * 2);
 const ownedEntityName = "UbeSwap";
-const thirdPartyEntityName = "SwapUber"
+const ownedEntityUrl = "https://ubeswap.com";
+const thirdPartyEntityName = "SwapUber";
+const thirdPartyEntityUrl = "https://swapuber.com";
+const maxSellerCount = 10;
+const maxBuyerCount = 10;
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
 
@@ -33,10 +38,10 @@ describe("Voting", function() {
     let contract;
     let oracle;
 
-    before(async function() {
+    this.beforeAll(async function() {
 
         [acc0, acc1, acc2, acc3, acc4, acc5, acc6, acc7, acc8, acc9, acc10, acc11, acc12, acc13, acc14, acc15, acc16, acc17, acc18] = await ethers.getSigners();
-        controller = await (await (await ethers.getContractFactory("SwapController")).deploy(acc1.address)).deployed();
+        controller = await (await (await ethers.getContractFactory("SwapController")).deploy(acc1.address, maxSellerCount, maxBuyerCount)).deployed();
         oracle = await (await (await ethers.getContractFactory("RateOracle")).deploy(controller.address
             , acc1.address
             , voterFeeRatio
@@ -56,8 +61,10 @@ describe("Voting", function() {
 
         tx = await controller.createSwapContract(
             ownedEntityName
+            , ownedEntityUrl
             , poolToken.address
             , (PREMIUM * 10000).toString()
+            , (MAKER_FEE * 10000).toString()
             , INIT_MATURITY_DATE.toString()
             , INIT_EPOCH.toString()
         )
@@ -111,10 +118,9 @@ describe("Voting", function() {
                     }
                 }
 
-                expect(whitelistTx).to.be.revertedWith("AccessControl: account " +
-                caller.address +
-                " is missing role " +
-                adminRole)
+                expect(whitelistTx).to.be.revertedWith(
+                    `AccessControl: account ${caller.address.toLowerCase()} is missing role ${adminRole}`
+                );
             })
 
             it("Should not add an account which is already an existing voter", async () => {
@@ -160,8 +166,10 @@ describe("Voting", function() {
                 
                 const tx = await controller.createSwapContractAsThirdParty(
                     thirdPartyEntityName
+                    , thirdPartyEntityUrl
                     , poolToken.address
                     , (PREMIUM * 10000).toString()
+                    , (MAKER_FEE * 10000).toString()
                     , INIT_MATURITY_DATE.toString()
                     , INIT_EPOCH.toString()
                     , acc11.address
@@ -276,8 +284,8 @@ describe("Voting", function() {
 
                 const replaceTx = contract.replaceVoter(acc8.address, acc9.address);
 
-                await expect(replaceTx).to.emit(contract, "RemoveVoter").withArgs(acc8.address);
-                await expect(replaceTx).to.emit(contract, "AddVoter").withArgs(acc9.address);
+                await expect(replaceTx).to.emit(contract, "RemoveVoter").withArgs(acc8.address, ZERO_ADDRESS, acc0.address);
+                await expect(replaceTx).to.emit(contract, "AddVoter").withArgs(acc9.address, ZERO_ADDRESS, acc0.address);
             })
         })
 
@@ -297,10 +305,9 @@ describe("Voting", function() {
                     }
                 }
 
-                expect(whitelistTx).to.be.revertedWith("AccessControl: account ",
-                caller.address,
-                " is missing role ",
-                adminRole)
+                expect(whitelistTx).to.be.revertedWith(
+                    `AccessControl: account ${caller.address.toLowerCase()} is missing role ${adminRole}`
+                );
             })
 
             it("Should revert if trying to replace a voter that did not was not one previously", async () => {
@@ -312,6 +319,159 @@ describe("Voting", function() {
                 expect(thirdPartyReplaceTx).to.be.revertedWith("Address being removed is not a voter");
                 expect(ownedReplaceTx).to.be.revertedWith("Address being removed is not a voter");
             })
+        })
+    })
+
+    describe("payRecurringVoterFees", function() {
+        const startIndex = 0;
+        let endIndex = 5;
+        let previousVoterData = {};
+        let swapPoolAmounts = {};
+        let swaps;
+        context("Happy Path", function () {
+
+            before(async() => {
+
+                swaps = await controller.getSwapList();
+                if (swaps.length <= endIndex) endIndex = swaps.length - 1;
+                for (const swap of swaps.slice(startIndex, endIndex + 1)) {
+                    const voters = await contract.getVoterList(swap);
+
+                    const totalAmountToPay = ethers.utils.formatEther(await oracle.getRecurringFeeAmount(
+                        (await ethers.getContractAt("CEXDefaultSwap", swap)).totalVoterFeeRemaining(),
+                        swap
+                    ))
+
+                    const amountPerVoter = +totalAmountToPay/voters.length;
+                    const swapAmounts = {
+                        total: ethers.utils.parseEther(totalAmountToPay).toString(),
+                        perVoter: ethers.utils.parseEther(amountPerVoter.toString()).toString()
+                    }
+                    swapPoolAmounts[swap] = swapAmounts;
+
+                    for (const voter of voters) {
+                        if (!previousVoterData[voter]) 
+                        previousVoterData[voter] = {
+                            tokenBal: (await poolToken.balanceOf(voter)).toString(),
+                            pools: [swap]
+                        }
+
+                        else previousVoterData[voter].pools.push(swap)
+                    }
+
+                }
+            })
+
+            it("Should emit PayVoters event", async () => {
+
+                const payTx = await contract.payRecurringVoterFees(startIndex.toString(), endIndex.toString());
+
+                await expect(payTx).to.emit(contract, "PayVoters").withArgs(
+                    swaps.slice(startIndex, endIndex + 1)
+                    , swaps.slice(startIndex, endIndex + 1).map(swap => swapPoolAmounts[swap].total)
+                    , startIndex.toString()
+                    , endIndex.toString()
+                )
+            })
+
+            it("Should transfer the amount of rewards to be paid to the voters and update their token balances", async () => {
+
+                for (const voter in previousVoterData) {
+                    voterBalanceAfterPay = (await poolToken.balanceOf(voter)).toString();
+
+                    const expectedTransfer = previousVoterData[voter].pools.reduce((acc, curr) => {
+                        return +acc + (+swapPoolAmounts[curr].perVoter)
+                    }, 0)
+
+                    expect(+voterBalanceAfterPay - (+previousVoterData[voter].tokenBal)).to.equal(expectedTransfer);
+                }
+            })
+        })
+
+        context("Edge cases", function() {
+
+            it("Should revert if startIndex passed is higher or equal to endIndex", async () => {
+
+                const payTx = contract.payRecurringVoterFees(5, 5);
+                await expect(payTx).to.be.revertedWith("Index Misappropriation. Start must be before end");
+
+                const payTx2 = contract.payRecurringVoterFees(7, 4);
+                await expect(payTx2).to.be.revertedWith("Index Misappropriation. Start must be before end");
+
+            }) 
+
+            it("Should only be callable by the superAdmin", async () => {
+                const adminRole = await contract.SUPER_ADMIN();
+                const payTx = contract.connect(acc5).payRecurringVoterFees(0, 2);
+                await expect(payTx).to.be.revertedWith(
+                    `AccessControl: account ${acc5.address.toLowerCase()} is missing role ${adminRole}`
+                );
+
+                const payTx2 = contract.connect(acc7).payRecurringVoterFees(0, 2);
+                await expect(payTx2).to.be.revertedWith(
+                    `AccessControl: account ${acc7.address.toLowerCase()} is missing role ${adminRole}`
+                );
+
+            }) 
+        })
+    })
+
+    describe("withdrawPendingReserve", function() {
+        const startIndex = 0;
+        const endIndex = 5;
+        let previousReserveAmount;
+        let previousRecipientBalance;
+        let previousContractBalance;
+        let recipient;
+        let poolAddress
+        context("Happy Path", function () {
+
+            before(async() => {
+                recipient = (await ethers.getSigners())[10];
+                poolAddress = await controller.swapList(0);
+                previousRecipientBalance = (await poolToken.balanceOf(recipient.address)).toString();
+                previousContractBalance = (await poolToken.balanceOf(contract.address)).toString();
+                previousReserveAmount = await (await ethers.getContractAt("CEXDefaultSwap", poolAddress)).totalVoterFeeRemaining();
+                
+            })
+
+            it("Should emit WithdrawReserve event", async () => {
+
+                const withdrawTx = await contract.withdrawPendingReserve(poolAddress, recipient.address);
+
+                await expect(withdrawTx).to.emit(contract, "WithdrawReserve").withArgs(
+                    poolAddress
+                    , previousReserveAmount
+                    , recipient.address
+                    , acc0.address
+                )
+            })
+
+            it("Should transfer the withdrawn amount to the recipient and update their balances", async () => {
+
+                const finalRecipientBalance = (await poolToken.balanceOf(recipient.address)).toString();
+                const finalContractBalance = (await poolToken.balanceOf(recipient.address)).toString();
+
+                expect(+finalContractBalance - (+previousContractBalance)).to.equal(-previousReserveAmount);
+                expect(+finalRecipientBalance - (+previousRecipientBalance)).to.equal(+previousReserveAmount);
+            })
+        })
+
+        context("Edge cases", function() {
+
+            it("Should only be callable by the superAdmin", async () => {
+                const adminRole = await contract.SUPER_ADMIN();
+                const withdrawTx = contract.connect(acc5).withdrawPendingReserve(poolAddress, recipient.address);
+                await expect(withdrawTx).to.be.revertedWith(
+                    `AccessControl: account ${acc5.address.toLowerCase()} is missing role ${adminRole}`
+                );
+
+                const withdrawTx2 = contract.connect(acc7).withdrawPendingReserve(poolAddress, recipient.address);
+                await expect(withdrawTx2).to.be.revertedWith(
+                    `AccessControl: account ${acc7.address.toLowerCase()} is missing role ${adminRole}`
+                );
+
+            }) 
         })
     })
 
@@ -344,11 +504,8 @@ describe("Voting", function() {
                 voterTokenBalances.push((await poolToken.balanceOf(acc2.address)).toString());
                 // await tx.wait();
 
-                await expect(tx).to.emit(contract, "Vote").withArgs(ownedPoolAddress, acc2.address, true, 1);
+                await expect(tx).to.emit(contract, "Vote").withArgs(ownedPoolAddress, acc2.address, 1);
 
-                const vote = await contract.poolVotes(ownedPoolAddress, 0)
-                expect(vote.voter).to.equal(acc2.address);
-                expect(vote.choice).to.equal(true);
                 expect(await contract.voterHasVoted(ownedPoolAddress, acc2.address)).to.equal(true);
                 expect(await contract.trueVoteCount(ownedPoolAddress)).to.equal(1);
                 expect(await contract.votingState(ownedPoolAddress)).to.equal(false);
@@ -362,17 +519,13 @@ describe("Voting", function() {
                 voterTokenBalances.push((await poolToken.balanceOf(acc3.address)).toString());
 
                 await tx.wait();
-                const vote = await contract.poolVotes(ownedPoolAddress, 1)
-                
-                expect(vote.voter).to.equal(acc3.address);
-                expect(vote.choice).to.equal(true);
                 expect(await contract.votingState(ownedPoolAddress)).to.equal(true);
                 expect(await poolContract.isPaused()).to.be.true;
                 expect((await poolContract.isPaused()) && poolPreviouslyPaused).to.be.false;
             })
 
             it("Should execute the final vote and pay all fees to the voters in rational majority and set defaulted if rational majority voted true", async () => {
-                const voterFeePaid = await poolContract.totalVoterFeePaid();
+                const voterFeePaid = await poolContract.totalVoterFeeRemaining();
                 const votersExpected = await oracle.getNumberOfVotersRequired(ownedPoolAddress);
                 const prevContractTokenBalance = (await poolToken.balanceOf(contract.address)).toString();
 
@@ -425,7 +578,6 @@ describe("Voting", function() {
                         expect(await contract.voterHasVoted(ownedPoolAddress, acc.address)).to.be.false;
                     })
                     expect(await contract.votingState(ownedPoolAddress)).to.be.false;
-                    await expect(contract.poolVotes(ownedPoolAddress, 0)).to.be.reverted;
                     expect(await contract.trueVoteCount(ownedPoolAddress)).to.equal(0);
                 }
                 
@@ -463,10 +615,6 @@ describe("Voting", function() {
                     expect(voteTx).to.emit(contract, "Vote").withArgs(ownedPoolAddress, acc3.address, true, 1);
                     await voteTx;
 
-                    const vote = await contract.poolVotes(ownedPoolAddress, 0)
-
-                    expect(vote.voter).to.equal(acc3.address);
-                    expect(vote.choice).to.equal(true);
                     expect(await contract.voterHasVoted(ownedPoolAddress, acc3.address)).to.equal(true);
                     expect(await contract.trueVoteCount(ownedPoolAddress)).to.equal(1);
                     expect(await contract.votingState(ownedPoolAddress)).to.equal(false);
@@ -508,12 +656,105 @@ describe("Voting", function() {
                 const voterRole = await contract.VOTER_ROLE();
                 const voteTx = contract.connect(acc0).vote(ownedPoolAddress, true);
 
-                expect(voteTx).to.be.revertedWith("AccessControl: account " +
-                acc0 +
-                " is missing role " +
-                voterRole)
+                expect(voteTx).to.be.revertedWith(
+                    `AccessControl: account ${acc0.address} is missing role ${voterRole}`
+                );
             })
         })
         
+    })
+
+    describe("setControllerContract", function() {
+        let controllerAddress;
+
+        context("Happy Path", function () {
+
+            it("Should emit SetController event", async () => {
+
+                controllerAddress = (await (await (await ethers.getContractFactory("SwapController")).deploy(acc1.address, maxSellerCount, maxBuyerCount)).deployed()).address;
+
+                const setTx = await contract.setControllerContract(controllerAddress);
+
+                await expect(setTx).to.emit(contract, "SetController").withArgs(controllerAddress)
+            })
+        })
+
+        context("Edge cases", function() {
+
+            it("Should revert if passed address does not contain a contract", async () => {
+                const setTx = contract.setControllerContract(acc9.address);
+                await expect(setTx).to.be.revertedWith("Attempting to set invalid address. Check that it is not zero address, and that it is for a contract");
+            })
+
+            it("Should revert if setting same address already set previously", async () => {
+                const setTx = contract.setControllerContract(controllerAddress);
+                await expect(setTx).to.be.revertedWith("Already set");
+            })
+
+            it("Should only be callable by the superAdmin", async () => {
+                const adminRole = await contract.SUPER_ADMIN();
+                const setTx = contract.connect(acc5).setControllerContract(controllerAddress);
+                await expect(setTx).to.be.revertedWith(
+                    `AccessControl: account ${acc5.address.toLowerCase()} is missing role ${adminRole}`
+                );
+
+                const setTx2 = contract.connect(acc7).setControllerContract(controllerAddress);
+                await expect(setTx2).to.be.revertedWith(
+                    `AccessControl: account ${acc7.address.toLowerCase()} is missing role ${adminRole}`
+                );
+
+            }) 
+        })
+    })
+
+
+    describe("setOracleContract", function() {
+        let oracleAddress;
+
+        context("Happy Path", function () {
+
+            it("Should emit SetController event", async () => {
+
+                oracleAddress = (await (await (await ethers.getContractFactory("RateOracle")).deploy(controller.address
+                    , acc1.address
+                    , voterFeeRatio
+                    , voterFeeComplementaryRatio
+                    , recurringFeeRatio
+                    , recurringFeeComplementaryRatio
+                    , votersRequired
+                    , recurringPaymentInterval)).deployed()).address;
+
+                const setTx = await contract.setOracleContract(oracleAddress);
+
+                await expect(setTx).to.emit(contract, "SetOracle").withArgs(oracleAddress)
+            })
+        })
+
+        context("Edge cases", function() {
+
+            it("Should revert if passed address does not contain a contract", async () => {
+                const setTx = contract.setOracleContract(acc9.address);
+                await expect(setTx).to.be.revertedWith("Attempting to set invalid address. Check that it is not zero address, and that it is for a contract");
+            })
+
+            it("Should revert if setting same address already set previously", async () => {
+                const setTx = contract.setOracleContract(oracleAddress);
+                await expect(setTx).to.be.revertedWith("Already set");
+            })
+
+            it("Should only be callable by the superAdmin", async () => {
+                const adminRole = await contract.SUPER_ADMIN();
+                const setTx = contract.connect(acc5).setOracleContract(oracleAddress);
+                await expect(setTx).to.be.revertedWith(
+                    `AccessControl: account ${acc5.address.toLowerCase()} is missing role ${adminRole}`
+                );
+
+                const setTx2 = contract.connect(acc7).setOracleContract(oracleAddress);
+                await expect(setTx2).to.be.revertedWith(
+                    `AccessControl: account ${acc7.address.toLowerCase()} is missing role ${adminRole}`
+                );
+
+            }) 
+        })
     })
 })
