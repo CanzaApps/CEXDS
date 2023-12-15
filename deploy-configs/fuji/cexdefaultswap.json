@@ -1,0 +1,37 @@
+{
+    "ownedSwaps": [
+        {
+            "entityName": "Binance",
+            "entityUrl": "https://binance.com",
+            "tokenAddress": "",
+            "premium": 0.01,
+            "makerFee": 0.003,
+            "initialMaturityTimestamp": "",
+            "intialEpochDays": 7
+        },
+
+        {
+            "entityName": "Binance",
+            "entityUrl": "https://binance.com",
+            "tokenAddress": "",
+            "premium": 0.01,
+            "makerFee": 0.003,
+            "initialMaturityTimestamp": "",
+            "intialEpochDays": 7
+        }
+    ],
+
+    "thirdPartySwaps": [
+        {
+            "entityName": "Gate.io",
+            "entityUrl": "https://gate.io",
+            "tokenAddress": "",
+            "premium": 0.01,
+            "makerFee": 0.003,
+            "initialMaturityTimestamp": "",
+            "intialEpochDays": 7,
+            "owner": "",
+            "voters": []
+        }
+    ]
+}
