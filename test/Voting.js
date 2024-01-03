@@ -19,7 +19,7 @@ const thirdPartyEntityUrl = "https://swapuber.com";
 const maxSellerCount = 10;
 const maxBuyerCount = 10;
 
-const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
 describe("Voting", function() {
 
