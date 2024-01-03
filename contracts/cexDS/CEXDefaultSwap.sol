@@ -352,6 +352,7 @@ contract CEXDefaultSwap is DateTime, Ownable, ICreditDefaultSwap {
 
     function _transferTo(uint256 _amount, address _user) internal {
         bool transferSuccess = IERC20(currency).transfer(_user, _amount);
+
         if (!transferSuccess) revert();
     }
 }
