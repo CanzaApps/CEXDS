@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ~0.8.18;
+pragma solidity 0.8.18;
 
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -23,6 +23,7 @@ contract CEXDefaultSwap {
     address public immutable controller;
     uint256 public totalVoterFeePaid;
     uint256 public totalVoterFeeRemaining;
+    uint256 public treasuryBalance;
 
     //Epoch variables
     uint256 public epoch;
@@ -104,16 +105,19 @@ contract CEXDefaultSwap {
     bool public closed;
     bool public defaulted;
 
-    //Stores all token Values sent to the contract
-    mapping(address => uint256) public fallBackEntries;
-
     // _actualDepositedAmount would be less than _amount in event that the ERC20 token deposited implements fee on transfer
     event Deposit(address indexed _seller, uint256 _amount, uint256 _actualdepositedAmount);
     event Withdraw(address indexed _seller, uint256 _amount, uint256 _actualwithdrawAmount);
-    event PurchaseCollateral(address indexed _buyer, uint256 _amount, uint256 _actualPurchasedAmount, uint256 premiumPaid, uint256 _makerFeePaid);
+    event PurchaseCollateral(address indexed _buyer, uint256 _amount, uint256 _actualPurchasedAmount, uint256 premiumPaid, uint256 _makerFeePaid, uint256 _voterFeePaid, uint256 _treasuryDeposit);
     event ClaimPremium(address indexed _seller, uint256 _amount, uint256 _actualTransferAmount);
     event ClaimCollateral(address indexed _buyer, uint256 _amount, uint256 _actualPurchasedAmount);
     event WithdrawFromBalance(address _recipient, uint256 _amount, uint256 _actualAmountReceived);
+    event SetPaused();
+    event SetUnpaused();
+    event SetDefaulted();
+    event ClosePool();
+    event RollEpoch();
+    event ResetAfterDefault();
 
     /// @dev Deploys contract and initializes state variables
     /// @param _entityName the name of the specific entity which the Swap pool represents
@@ -256,6 +260,7 @@ contract CEXDefaultSwap {
 
         buyers[msg.sender].premiumPaid += premiumPaid;
         buyers[msg.sender].collateralCovered += actualCollateralToPurchase;
+        treasuryBalance += makerFeePaid - voterFee;
 
         //For each user reduce available amount pro-rata
         //Handle reductions per user first
@@ -304,7 +309,7 @@ contract CEXDefaultSwap {
             onBuyerList[msg.sender] = true;
         }
 
-        emit PurchaseCollateral(msg.sender, _amount, actualCollateralToPurchase, premiumPaid, makerFeePaid);
+        emit PurchaseCollateral(msg.sender, _amount, actualCollateralToPurchase, premiumPaid, makerFeePaid, actualVotingFeeSent, makerFeePaid - voterFee);
     }
 
     /// @notice Allows existing seller to claim premium previously paid by buyers on purchase
@@ -457,8 +462,10 @@ contract CEXDefaultSwap {
     /// @param _recipient address to which the withdrawn amount should be sent
     function withdrawFromBalance(uint256 _amount, address _recipient) external {
         if(msg.sender != controller) revert("Unauthorized");
+        if(_amount > treasuryBalance) revert("Attempting to withdraw beyond treasury payment");
 
         uint256 actualAmountSent = _transferTo(_amount, _recipient);
+        treasuryBalance -= _amount;
         emit WithdrawFromBalance(_recipient, _amount, actualAmountSent);
     }
 
@@ -468,10 +475,12 @@ contract CEXDefaultSwap {
         defaulted = true;
         paused = false;
         execute(false);
+        emit SetDefaulted();
     }
 
     function pause() external validCaller {
         paused = true;
+        emit SetPaused();
     }
 
     function unpause() external validCaller {
@@ -479,6 +488,7 @@ contract CEXDefaultSwap {
 
         paused = false;
         execute(false);
+        emit SetUnpaused();
     }
     
     
@@ -489,6 +499,7 @@ contract CEXDefaultSwap {
         defaulted = false;
         paused = false;
         _rollEpoch(_newMaturityDate);
+        emit ResetAfterDefault();
 
     }
 
@@ -497,12 +508,14 @@ contract CEXDefaultSwap {
         require(msg.sender == controller, "Unauthorized");
 
         execute(true);
+        emit ClosePool();
     }
 
     function rollEpoch() external {
         require(msg.sender == controller, "Unauthorized");
         require(block.timestamp >= maturityDate, "Maturity Date not yet reached");
         execute(false);
+        
     }
     
     //Epoch Vairable Handlers
@@ -510,7 +523,7 @@ contract CEXDefaultSwap {
 
         maturityDate = _newMaturityDate;
         epoch ++;
-
+        emit RollEpoch();
     }
     
 

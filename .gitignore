@@ -12,6 +12,10 @@ artifacts
 
 scripts/newdep.js
 scripts/runs.js
+scripts/checkFileLines.js
 
 deploy-configs/*/*
 deployments/*
+
+#IDE
+.vscode

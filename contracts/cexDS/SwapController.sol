@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ~0.8.18;
+pragma solidity 0.8.18;
 
 import "./CEXDefaultSwap.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
@@ -16,8 +16,8 @@ contract SwapController is AccessControl {
     address public votingContract;
     address public oracleContract;
 
-    uint256 public maxNumberOfSellersPerPool;
-    uint256 public maxNumberOfBuyersPerPool;
+    uint256 public constant maxNumberOfSellersPerPool = 100;
+    uint256 public constant maxNumberOfBuyersPerPool = 100;
 
     event SetOracleContract(address _oracleContract);
     event SetVotingContract(address _votingContract);
@@ -36,15 +36,11 @@ contract SwapController is AccessControl {
 
     constructor(
         address secondSuperAdmin
-        , uint256 _maxNumberOfSellersPerPool
-        , uint256 _maxNumberOfBuyersPerPool
     ) {
         if (secondSuperAdmin == address(0)) revert("Attempting to set zero address as admin");
         _setupRole(SUPER_ADMIN, msg.sender);
         _setupRole(SUPER_ADMIN, secondSuperAdmin);
         _setRoleAdmin(ADMIN_CONTROLLER, SUPER_ADMIN);
-        maxNumberOfBuyersPerPool = _maxNumberOfBuyersPerPool;
-        maxNumberOfSellersPerPool = _maxNumberOfSellersPerPool;
     }
 
     modifier isAdmin() {

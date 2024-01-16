@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ~0.8.18;
+pragma solidity 0.8.18;
 
 import "./CEXDefaultSwap.sol";
 import "./SwapController.sol";
@@ -60,6 +60,8 @@ contract Voting is AccessControl {
         address controllerAddress,
         address oracle
     ) {
+        require(controllerAddress.isContract() && oracle.isContract(), "Address is not a contract");
+        require(secondSuperAdmin != address(0), "Zero address passed");
         _setupRole(SUPER_ADMIN, msg.sender);
         _setupRole(SUPER_ADMIN, secondSuperAdmin);
         _setRoleAdmin(VOTER_ROLE, SUPER_ADMIN);
@@ -243,6 +245,7 @@ contract Voting is AccessControl {
      * @param _recipient address which should receive the withdrawn reserved tokens.
      */
     function withdrawPendingReserve(address _poolAddress, address _recipient) external onlyRole(SUPER_ADMIN) {
+        if(!CEXDefaultSwap(_poolAddress).closed()) revert("Withdrawing from Voter Reserve is not supported except pool is closed");
         uint256 reserveAvailable = CEXDefaultSwap(_poolAddress).totalVoterFeeRemaining();
 
         CEXDefaultSwap(_poolAddress).currency().safeTransfer(_recipient, reserveAvailable);
@@ -342,7 +345,7 @@ contract Voting is AccessControl {
 
     function _removeVoter(address _voter, address _poolAddress) private {
 
-        uint i;
+        uint256 i;
         bool reachedVoter;
         address[] memory voters = voterList;
         if (poolHasSpecificVoters[_poolAddress]) voters = poolVoters[_poolAddress];

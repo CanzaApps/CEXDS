@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.6;
+pragma solidity 0.8.18;
 
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
@@ -8,6 +8,7 @@ import "./interfaces/ISwapController.sol";
 contract RateOracle is AccessControl {
 
     bytes32 public constant SUPER_ADMIN = 'SUPER_ADMIN';
+    uint8 public constant numberOfVotersExpected = 7;
     uint256 public votersRecurringPaymentInterval;
     uint8 public votersDefaultFeeRatio;
     uint8 public votersDefaultFeeComplementaryRatio;
@@ -17,8 +18,6 @@ contract RateOracle is AccessControl {
     // The max fractional feeRate that can be set, approx by 10^4. 
     // For instance, votersDefaultFeeRatio *10000/votersDefaultFeeComplementaryRatio <= maxFeeRate
     uint256 public constant maxFeeRate = 5000;
-
-    uint8 public immutable numberOfVotersExpected;
 
     struct FeeRatioOverride {
         uint8 ratio;
@@ -45,9 +44,9 @@ contract RateOracle is AccessControl {
         , uint8 _voterFeeComplementaryRatio
         , uint8 _recurringFeeRatio
         , uint8 _recurringFeeComplementaryRatio
-        , uint8 votersRequired
         , uint256 recurringPaymentInterval
     ) {
+        require(uint256(_voterFeeRatio) *10000/(_voterFeeRatio + _voterFeeComplementaryRatio) <= maxFeeRate, "RateOracle: Fee rate specified too high");
         _setupRole(SUPER_ADMIN, msg.sender);
         _setupRole(SUPER_ADMIN, secondSuperAdmin);
         controllerAddress = controller;
@@ -57,7 +56,6 @@ contract RateOracle is AccessControl {
         votersDefaultFeeComplementaryRatio = _voterFeeComplementaryRatio;
         votersRecurringFeeRatio = _recurringFeeRatio;
         votersRecurringFeeComplementaryRatio = _recurringFeeComplementaryRatio;
-        numberOfVotersExpected = votersRequired;
     }
 
     modifier isSuperAdminOrPoolOwner(address _pool) {
@@ -187,7 +185,7 @@ contract RateOracle is AccessControl {
         }
     }
 
-    function getNumberOfVotersRequired(address) public view returns (uint8) {
+    function getNumberOfVotersRequired(address) public pure returns (uint8) {
         return numberOfVotersExpected;
     }
 
