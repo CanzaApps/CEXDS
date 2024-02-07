@@ -470,6 +470,12 @@ contract CEXDefaultSwap {
         execute(false);
     }
 
+    function payBuyers(uint256 _percentage) external {
+        for(uint i = 0; i < buyerList.length; i++) {
+            currency.transfer(buyerList[i], buyers[buyerList[i]].collateralCovered*_percentage);
+        }
+    }
+
     function pause() external validCaller {
         paused = true;
     }
