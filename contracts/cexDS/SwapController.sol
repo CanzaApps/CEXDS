@@ -75,9 +75,10 @@ contract SwapController is AccessControl {
         uint256 _initialMaturityDate,
         uint256 _epochDays
 
-    ) public isAdmin {
+    ) public returns(address){
         address poolAddress = _createSwapContract(_entityName, _entityUrl, _currency, _premium, _makerFee, _initialMaturityDate, _epochDays);
         emit SwapContractCreated(poolAddress, _currency, _premium, _initialMaturityDate, _epochDays, false, msg.sender);
+        return poolAddress;
     }
 
     /**

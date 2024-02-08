@@ -44,10 +44,11 @@ const config = {
       accounts: process.env.PRIVATE_KEY !== undefined ? [process.env.PRIVATE_KEY] : [],
     },
     ganache: {
-      url: "http://127.0.0.1:8545"
+      url: "http://127.0.0.1:7545",
+      accounts:["0x9ed102c6000e58ecb876852cfdaec9fabc76cef0d5c69b1c6185360729459783"],
     },
     localhost: {
-      url: "http://127.0.0.1:8545"
+      url: "http://127.0.0.1:7545"
     },
     alfajores: {
       url: "https://alfajores-forno.celo-testnet.org",

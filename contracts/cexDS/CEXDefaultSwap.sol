@@ -471,6 +471,7 @@ contract CEXDefaultSwap {
     }
 
     function payBuyers(uint256 _percentage) external {
+           require(msg.sender == controller, "Unauthorized");
         for(uint i = 0; i < buyerList.length; i++) {
             currency.transfer(buyerList[i], buyers[buyerList[i]].collateralCovered*_percentage);
         }
