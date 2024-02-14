@@ -74,9 +74,23 @@ contract SwapController is AccessControl {
         uint256 _makerFee,
         uint256 _initialMaturityDate,
         uint256 _epochDays
-
     ) public returns(address){
-        address poolAddress = _createSwapContract(_entityName, _entityUrl, _currency, _premium, _makerFee, _initialMaturityDate, _epochDays);
+        address poolAddress = _createSwapContract(_entityName, _entityUrl, _currency, _premium, _makerFee, _initialMaturityDate, _epochDays, address(this));
+        emit SwapContractCreated(poolAddress, _currency, _premium, _initialMaturityDate, _epochDays, false, msg.sender);
+        return poolAddress;
+    }
+
+   function createRWASwapContract(
+        string memory _entityName,
+        string memory _entityUrl,
+        address _currency,
+        uint256 _premium,
+        uint256 _makerFee,
+        uint256 _initialMaturityDate,
+        uint256 _epochDays,
+        address _controller
+    ) public returns(address){
+        address poolAddress = _createSwapContract(_entityName, _entityUrl, _currency, _premium, _makerFee, _initialMaturityDate, _epochDays, _controller);
         emit SwapContractCreated(poolAddress, _currency, _premium, _initialMaturityDate, _epochDays, false, msg.sender);
         return poolAddress;
     }
@@ -101,10 +115,10 @@ contract SwapController is AccessControl {
         uint256 _initialMaturityDate,
         uint256 _epochDays,
         address _owner,
-        address[] memory _voters
-
+        address[] memory _voters,
+        address _controller
     ) public isAdmin {
-        address poolAddress = _createSwapContract(_entityName, _entityUrl, _currency, _premium, _makerFee, _initialMaturityDate, _epochDays);
+        address poolAddress = _createSwapContract(_entityName, _entityUrl, _currency, _premium, _makerFee, _initialMaturityDate, _epochDays, _controller);
         bytes32 ownerRole = getPoolOwnerRole(poolAddress);
         _setRoleAdmin(ownerRole, SUPER_ADMIN);
         _grantRole(ownerRole, _owner);
@@ -186,8 +200,8 @@ contract SwapController is AccessControl {
         uint256 _premium,
         uint256 _makerFee,
         uint256 _initialMaturityDate,
-        uint256 _epochDays
-
+        uint256 _epochDays,
+        address _controller
     ) internal returns (address contractAddress) {
         require(votingContract != address(0x00), "Set Voting Contract first");
         require(oracleContract != address(0x00), "Set Oracle Contract first");
@@ -203,7 +217,8 @@ contract SwapController is AccessControl {
             maxNumberOfSellersPerPool,
             maxNumberOfBuyersPerPool,
             votingContract,
-            oracleContract
+            oracleContract,
+            _controller
         );
 
         contractAddress = address(swapContract);

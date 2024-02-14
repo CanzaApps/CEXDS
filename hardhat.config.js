@@ -23,7 +23,8 @@ const config = {
       optimizer: {
         enabled: true,
         runs: 200
-      }
+      },
+      viaIR: true,
       /*, debug: {
         revertStrings: "strip"
       }*/

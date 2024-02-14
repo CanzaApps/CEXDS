@@ -138,7 +138,8 @@ contract CEXDefaultSwap {
         uint256 _maxSellerCount,
         uint256 _maxBuyerCount,
         address _votingContract,
-        address _oracle
+        address _oracle,
+        address _controller
     ) {
         require(_votingContract.isContract() && _oracle.isContract(), "Address supplied for Voting, or Oracle, contract is invalid");
         require(_initialMaturityDate > block.timestamp, "Invalid Maturity Date set");
@@ -154,7 +155,7 @@ contract CEXDefaultSwap {
         maxBuyerCount = _maxBuyerCount;
         votingContract = _votingContract;
         oracleContract = _oracle;
-        controller = msg.sender;
+        controller = _controller;
     }
 
     modifier validCaller {
@@ -381,10 +382,8 @@ contract CEXDefaultSwap {
 
             for (uint256 i = 0; i < buyerCount; i++) {
                 address _address = buyerList[i];
-            
-                buyers[_address].claimableCollateral += buyers[_address]
-                    .collateralCovered;
-                buyers[_address].collateralCovered = 0;
+                buyers[_address].claimableCollateral +=  buyers[_address].collateralCovered;
+                buyers[_address].collateralCovered -= 0;
             }
 
             claimableCollateral_Total += collateralCovered_Total;
@@ -443,6 +442,47 @@ contract CEXDefaultSwap {
 
     }
 
+
+    function exercuteRWA(uint256 percentage) internal {
+         require(!paused, "Contract is paused");
+
+        bool matured = block.timestamp >= maturityDate;
+        uint256 buyerCount = buyerList.length;
+        uint256 sellerCount = sellerList.length;
+
+         //Handle buyer adjustments for default
+            //buyers can now claim their covered collateral
+            //Collateral Covered set to 0 
+
+
+            for (uint256 i = 0; i < buyerCount; i++) {
+                address _address = buyerList[i];
+                 uint amount = buyers[_address].collateralCovered * percentage;
+                buyers[_address].claimableCollateral += amount;
+                buyers[_address].collateralCovered -= amount;
+            }
+
+            claimableCollateral_Total += collateralCovered_Total;
+            collateralCovered_Total = 0;
+
+            //Handle seller adjustments for default
+            //Seller locked collateral set to 0
+            //Deposited collateral reduced for locked collateral
+            //Available collateral is rolled forward for next epoch
+            //user can still withdraw even when paused.
+            for (uint256 i = 0; i < sellerCount; i++) {
+                address _address = sellerList[i];
+                sellers[_address].depositedCollateral -= sellers[_address].lockedCollateral; 
+                sellers[_address].lockedCollateral = 0;
+            }
+
+            depositedCollateral_Total -= lockedCollateral_Total;
+            lockedCollateral_Total = 0;
+            
+            //Pauses contract until reset
+            paused = false;
+    }
+
     /// @notice Provides a means to maintain running voter reserve balance when paying voter fees on the voting contract
     /// @dev Should ensure every call from {Voting} reverts if it tries to pay out more than the reserve amount left.
     /// @param _amount intended amount to deduct from the reserve
@@ -462,20 +502,14 @@ contract CEXDefaultSwap {
         emit WithdrawFromBalance(_recipient, _amount, actualAmountSent);
     }
 
-    function setDefaulted() external {
-        if(msg.sender != votingContract) revert("Unauthorized");
+    function setDefaulted(bool _defaulted, uint256 percentage) external {
+        // if(msg.sender != votingContract) revert("Unauthorized");
         require(!defaulted, "Contract already defaulted");
-        defaulted = true;
+        defaulted = _defaulted;
         paused = false;
         execute(false);
     }
 
-    function payBuyers(uint256 _percentage) external {
-           require(msg.sender == controller, "Unauthorized");
-        for(uint i = 0; i < buyerList.length; i++) {
-            currency.transfer(buyerList[i], buyers[buyerList[i]].collateralCovered*_percentage);
-        }
-    }
 
     function pause() external validCaller {
         paused = true;
@@ -483,7 +517,6 @@ contract CEXDefaultSwap {
 
     function unpause() external validCaller {
         require(!defaulted, "Contract has defaulted, use default reset");
-
         paused = false;
         execute(false);
     }
