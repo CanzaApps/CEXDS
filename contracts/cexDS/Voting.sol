@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ~0.8.18;
 
-import "./CEXDefaultSwap.sol";
+import "./CXDefaultSwap.sol";
 import "./SwapController.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -12,7 +12,7 @@ import "./interfaces/ISwapController.sol";
 import "./interfaces/IOracle.sol";
 
 /**
-* @title CXDX Multi-sig Voter Contract
+* @title CXDS Multi-sig Voter Contract
 *
 * @author Ebube
 */
@@ -45,9 +45,11 @@ contract Voting is AccessControl {
     // maps the pool address to the replacement voter and then to the previous voter
     // this is specifically for 3rd party pools
     mapping(address => mapping(address => address)) private replacementVotersPerPool;
+    mapping(address => mapping(address => uint256)) public voterPerPoolAccumulatedRewards;
 
     event Vote(address indexed _pool, address _voter, uint256 _votePosition);
-    event PayVoters(address[] _currencies, uint256[] _amountPaidOut, uint256 _startIndex, uint256 _endIndex);
+    event PayVoters(address poolPaying, uint256 overallAmountPaid, address[] voters, bool isDefaultRewards);
+    event WithdrawVoterRewards(address indexed _voter, address _pool, uint256 amountWithdrawn);
     event AddVoter(address indexed _voter, address _pool, address _caller);
     event RemoveVoter(address indexed _voter, address _pool, address _caller);
     event WithdrawReserve(address indexed _pool, uint256 reserveAmount, address _recipient, address _caller);
@@ -70,42 +72,23 @@ contract Voting is AccessControl {
     /**
      * @notice Pay a percentage of accumulated voter fees to each individual voter. Can only be called by address with SUPER_ADMIN role.
      * @dev Percentage of reserve to pay is received from Oracle.getRecurringFeeAmount 
-     * @param startIndex index within the {SwapController.swapList} from which to start the payment iteration
-     * @param endIndex index within the {SwapController.swapList} at which to start the payment iteration
-     * @return pools Array containing the list of swap pools from which payment were made. Should naturally contain all pools
-     * @return amountsPaidOut Array of amounts paid with indices matching index of pool in pools array from which amount was paid
      */
-    function payRecurringVoterFees(uint256 startIndex, uint256 endIndex) 
-        external 
-        onlyRole(SUPER_ADMIN) 
-        returns (address[] memory pools, uint256[] memory amountsPaidOut) {
-        require(startIndex < endIndex, "Index Misappropriation. Start must be before end");
+    function payRecurringVoterFee() external {
 
-        pools = ISwapController(controller).getSwapList();
-        if (pools.length <= endIndex) endIndex = pools.length - 1;
-        amountsPaidOut = new uint256[](pools.length);
+        address poolPaying = msg.sender;
+        if(block.timestamp < lastVoterPaymentTimestamp[poolPaying] + CXDefaultSwap(poolPaying).epochDays() days) revert("Can not pay at this time");
+        address[] memory votersToPay = poolVoters[poolPaying];
+        if (votersToPay.length == 0) votersToPay = voterList;
 
-        for (uint256 i = startIndex; i <= endIndex; i++) {
-            address pool = pools[i];
-            if(block.timestamp < lastVoterPaymentTimestamp[pool] + IOracle(oracleAddress).getRecurringPaymentInterval(pool)) continue;
-            address[] memory votersToPay = poolVoters[pool];
-            if (votersToPay.length == 0) votersToPay = voterList;
+        uint256 totalAmountToPay = IOracle(oracleAddress).getRecurringFeeAmount(CXDefaultSwap(poolPaying).totalVoterFeeRemaining(), pool);
+        CXDefaultSwap(poolPaying).deductFromVoterReserve(totalAmountToPay/10000);
 
-            uint256 totalAmountToPay = IOracle(oracleAddress).getRecurringFeeAmount(CEXDefaultSwap(pool).totalVoterFeeRemaining(), pool); 
-            uint256 amountPerVoter = totalAmountToPay/(votersToPay.length * 10000);
-
-            CEXDefaultSwap(pool).deductFromVoterReserve(totalAmountToPay/10000);
-            amountsPaidOut[i] = totalAmountToPay/10000;
-
-            for (uint256 j = 0; j < votersToPay.length; j++) {
-                CEXDefaultSwap(pool).currency().safeTransfer(votersToPay[j], amountPerVoter);
-            }
-
-            lastVoterPaymentTimestamp[pool] = block.timestamp;
-            
+        for (uint256 j = 0; j < votersToPay.length; j++) {
+            voterPerPoolAccumulatedRewards[votersToPay[j]][poolPaying] += totalAmountToPay/votersToPay.length;
         }
-    
-        emit PayVoters(pools, amountsPaidOut, startIndex, endIndex);
+        lastVoterPaymentTimestamp[poolPaying] = block.timestamp;
+
+        emit PayVoters(poolPaying, totalAmountToPay, votersToPay, false);
     }
 
     /**
@@ -118,7 +101,10 @@ contract Voting is AccessControl {
         address _poolAddress
         , bool choice
         ) external {
-        
+        uint8 voterCount = IOracle(oracleAddress).getNumberOfVotersRequired(_poolAddress);
+        address[] memory voters = poolHasSpecificVoters[_poolAddress] ? poolVoters[_poolAddress] : voterList;
+
+        require(voters <)
         require(poolHasSpecificVoters[_poolAddress] && isPoolVoter[_poolAddress][msg.sender] || 
         (!poolHasSpecificVoters[_poolAddress] && hasRole(VOTER_ROLE, msg.sender))
         , "Not authorized to vote for this Swap");
@@ -151,15 +137,33 @@ contract Voting is AccessControl {
     }
 
     /**
-     * @notice add voters to a third-party pool, either at pool creation or after.
-      Must be called by controller contract, when creating a pool, by an admin, or by the pool owner.
-      The pool owner is verified via getPoolOwnerRole
+     * @notice allow voter to withdraw from the rewards accumulated overtime.
+     * @param _pool Pool on which the rewards were accumulated.
+     * @param _amountToWithdraw Amount to be withdrawn.
+     */
+    function withdrawVoterRewards(address _pool, uint256 _amountToWithdraw) external {
+
+        uint256 totalAccumulated = voterPerPoolAccumulatedRewards[msg.sender][_pool];
+        require(totalAccumulated < _amountToWithdraw, "Not sufficient available to withdraw");
+
+        totalAccumulated -= _amountToWithdraw;
+        voterPerPoolAccumulatedRewards[msg.sender][_pool] = totalAccumulated;
+        CXDefaultSwap(_pool).currency().safeTransfer(msg.sender, _amountToWithdraw);
+
+        emit WithdrawVoterRewards(msg.sender, _pool, _amountToWithdraw);
+    }
+
+    /**
+     * @notice add voters to a third-party pool at pool creation.
+      Must be called by controller contract, when creating a pool, by an admin.
      * @param voters List of voters to add to the contract.
      * @param pool Third-party pool address on which to add the voters.
      */
     function setVotersForPool(address[] memory voters, address pool) external {
-        if (msg.sender != controller && !hasRole(SUPER_ADMIN, msg.sender) && !ISwapController(controller).isPoolOwner(pool, msg.sender)) revert("Not authorized");
+        if (msg.sender != controller && !hasRole(SUPER_ADMIN, msg.sender)) revert("Not authorized");
         if (pool == address(0)) revert("No zero address pool");
+        uint8 requiredVoterCount = IOracle(oracleAddress).getNumberOfVotersRequired(_poolAddress);
+        if (voters.length != requiredVoterCount) revert("Incorrect number of voters supplied");
 
         poolHasSpecificVoters[pool] = true;
         _whiteListVoters(voters, pool);
@@ -243,11 +247,11 @@ contract Voting is AccessControl {
      * @param _recipient address which should receive the withdrawn reserved tokens.
      */
     function withdrawPendingReserve(address _poolAddress, address _recipient) external onlyRole(SUPER_ADMIN) {
-        uint256 reserveAvailable = CEXDefaultSwap(_poolAddress).totalVoterFeeRemaining();
+        uint256 reserveAvailable = CXDefaultSwap(_poolAddress).totalVoterFeeRemaining();
 
-        CEXDefaultSwap(_poolAddress).currency().safeTransfer(_recipient, reserveAvailable);
+        CXDefaultSwap(_poolAddress).currency().safeTransfer(_recipient, reserveAvailable);
 
-        CEXDefaultSwap(_poolAddress).deductFromVoterReserve(reserveAvailable);
+        CXDefaultSwap(_poolAddress).deductFromVoterReserve(reserveAvailable);
 
         emit WithdrawReserve(_poolAddress, reserveAvailable, _recipient, msg.sender);
     }
@@ -284,10 +288,10 @@ contract Voting is AccessControl {
             payout = votersForTrue > voterCount/2;
         }
         
-        uint256 amountToPay = CEXDefaultSwap(_poolAddress).totalVoterFeeRemaining();
+        uint256 amountToPay = CXDefaultSwap(_poolAddress).totalVoterFeeRemaining();
 
         // Reduce value of voter fee from the Pool Contract
-        CEXDefaultSwap(_poolAddress).deductFromVoterReserve(amountToPay);
+        CXDefaultSwap(_poolAddress).deductFromVoterReserve(amountToPay);
 
         if (payout) {
             ICreditDefaultSwap(_poolAddress).setDefaulted();
@@ -303,7 +307,8 @@ contract Voting is AccessControl {
             VoterData memory voterInfo = votesForPool[i];
             if (voterInfo.choice == payout) {
                 // Pay only to voters who are in the rational majority
-                CEXDefaultSwap(_poolAddress).currency().safeTransfer(voterInfo.voter, amountToPay/Math.max(votersForTrue, voterCount - votersForTrue));
+                
+                voterPerPoolAccumulatedRewards[voterInfo.voter][poolPaying] += amountToPay/Math.max(votersForTrue, voterCount - votersForTrue);
             }
 
             if (!payout) delete voterHasVoted[_poolAddress][votesForPool[i].voter];

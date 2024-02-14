@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ~0.8.18;
 
-import "./CEXDefaultSwap.sol";
+import "./CXDefaultSwap.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 import "./interfaces/ICreditDefaultSwap.sol";
 import "@openzeppelin/contracts/utils/Address.sol";
@@ -26,6 +26,7 @@ contract SwapController is AccessControl {
     , uint256 _premium
     , uint256 _initialMaturityTimestamp
     , uint256 _epochDays
+    , bool _withVoterConsensus
     , bool isThirdParty
     , address poolOwner);
     event PoolPaused(address indexed _poolAddress, address _sender);
@@ -73,26 +74,12 @@ contract SwapController is AccessControl {
         uint256 _premium,
         uint256 _makerFee,
         uint256 _initialMaturityDate,
-        uint256 _epochDays
-    ) public returns(address){
-        address poolAddress = _createSwapContract(_entityName, _entityUrl, _currency, _premium, _makerFee, _initialMaturityDate, _epochDays, address(this));
-        emit SwapContractCreated(poolAddress, _currency, _premium, _initialMaturityDate, _epochDays, false, msg.sender);
-        return poolAddress;
-    }
-
-   function createRWASwapContract(
-        string memory _entityName,
-        string memory _entityUrl,
-        address _currency,
-        uint256 _premium,
-        uint256 _makerFee,
-        uint256 _initialMaturityDate,
         uint256 _epochDays,
-        address _controller
-    ) public returns(address){
-        address poolAddress = _createSwapContract(_entityName, _entityUrl, _currency, _premium, _makerFee, _initialMaturityDate, _epochDays, _controller);
-        emit SwapContractCreated(poolAddress, _currency, _premium, _initialMaturityDate, _epochDays, false, msg.sender);
-        return poolAddress;
+        bool withVoterConsensus
+
+    ) public isAdmin {
+        address poolAddress = _createSwapContract(_entityName, _entityUrl, _currency, _premium, _makerFee, _initialMaturityDate, _epochDays, withVoterConsensus);
+        emit SwapContractCreated(poolAddress, _currency, _premium, _initialMaturityDate, _epochDays, withVoterConsensus, false, msg.sender);
     }
 
     /**
@@ -114,16 +101,17 @@ contract SwapController is AccessControl {
         uint256 _makerFee,
         uint256 _initialMaturityDate,
         uint256 _epochDays,
+        bool withVoterConsensus,
         address _owner,
         address[] memory _voters,
         address _controller
     ) public isAdmin {
-        address poolAddress = _createSwapContract(_entityName, _entityUrl, _currency, _premium, _makerFee, _initialMaturityDate, _epochDays, _controller);
+        address poolAddress = _createSwapContract(_entityName, _entityUrl, _currency, _premium, _makerFee, _initialMaturityDate, _epochDays, withVoterConsensus);
         bytes32 ownerRole = getPoolOwnerRole(poolAddress);
         _setRoleAdmin(ownerRole, SUPER_ADMIN);
         _grantRole(ownerRole, _owner);
         Voting(votingContract).setVotersForPool(_voters, poolAddress);
-        emit SwapContractCreated(poolAddress, _currency, _premium, _initialMaturityDate, _epochDays, false, msg.sender);
+        emit SwapContractCreated(poolAddress, _currency, _premium, _initialMaturityDate, _epochDays, withVoterConsensus, false, msg.sender);
     }
 
     /**
@@ -165,7 +153,7 @@ contract SwapController is AccessControl {
     }
 
     /**
-     * @notice provides a call to {CEXDEfaultSwap.rollEpoch} to update maturityTimestamp in a pool after it matures
+     * @notice provides a call to {CXDefaultSwap.rollEpoch} to update maturityTimestamp in a pool after it matures
      * @param _add the swap pool address
      */
     function rollPoolEpoch(address _add) external isSuperAdminOrPoolOwner(_add) {
@@ -206,7 +194,7 @@ contract SwapController is AccessControl {
         require(votingContract != address(0x00), "Set Voting Contract first");
         require(oracleContract != address(0x00), "Set Oracle Contract first");
 
-        CEXDefaultSwap swapContract = new CEXDefaultSwap(
+        CXDefaultSwap swapContract = new CXDefaultSwap(
             _entityName,
             _entityUrl,
             _currency,
