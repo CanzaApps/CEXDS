@@ -113,7 +113,7 @@ contract CXDefaultSwap {
         require(_votingContract.isContract() && _oracle.isContract() && _currency.isContract(), 
         "Address supplied for Voting, Currency, or Oracle, contract is invalid");
         require(_initialMaturityDate > block.timestamp, "Invalid Maturity Date set");
-        require(_premium < basicPoints && _makerFee < basicPoints, "Premium, and maker fee, can not be 100% or above");
+        require(_premium < basisPoints && _makerFee < basisPoints, "Premium, and maker fee, can not be 100% or above");
         currency = IERC20(_currency);
         entityName = _entityName;
         entityUrl = _entityUrl;
@@ -126,7 +126,7 @@ contract CXDefaultSwap {
         votingContract = _votingContract;
         oracleContract = _oracle;
         controller = msg.sender;
-        isVoterDefaulting = msg.sender;
+        isVoterDefaulting = _isVoterDefaulting;
     }
 
     modifier validCaller {
@@ -146,13 +146,13 @@ contract CXDefaultSwap {
         uint256 actualTransferAmount = _transferFrom(_amount);
 
         //Check if previous interaction to roll deposit share into lock share
-        bool notInteracted = !seller[msg.sender].interactedThisEpoch[epoch];
-        bool notZeroDeposit =  seller[msg.sender].userShareDeposit != 0;
+        bool notInteracted = !sellers[msg.sender].interactedThisEpoch[epoch];
+        bool notZeroDeposit =  sellers[msg.sender].userShareDeposit != 0;
 
         if(notInteracted && notZeroDeposit){
 
             //If the seller is interacting for the first time in this epoch add his collateral share balance to his ShareLock
-            seller[msg.sender].userShareLock[epoch] = seller[msg.sender].userShareDeposit;
+            sellers[msg.sender].userShareLock[epoch] = sellers[msg.sender].userShareDeposit;
         
         }
         
@@ -170,7 +170,7 @@ contract CXDefaultSwap {
         }
 
         //Increase userShareDeposit Ratio variables
-        seller[msg.sender].userShareDeposit += userShareDepositChange;
+        sellers[msg.sender].userShareDeposit += userShareDepositChange;
         globalShareDeposit += userShareDepositChange;
 
         //Handle the Lock Share changes
@@ -187,11 +187,11 @@ contract CXDefaultSwap {
         }
 
         //Increase userShareLock Ratio variables
-        seller[msg.sender].userShareLock[epoch] += userShareLockChange;        
+        sellers[msg.sender].userShareLock[epoch] += userShareLockChange;        
         globalShareLock[epoch] += userShareLockChange;
 
         //Set boolean to true for deposited this epoch
-        seller[msg.sender].interactedThisEpoch[epoch] = true;
+        sellers[msg.sender].interactedThisEpoch[epoch] = true;
 
 
         //Increase Deposited collateral and Available Collateral totals post the calculations
@@ -212,9 +212,9 @@ contract CXDefaultSwap {
         require(!paused,"Contract Paused");
         require(!closed,"Pool closed");
         
-        uint256 makerFeePayable = (_amount * makerFee) / basicPoints;
+        uint256 makerFeePayable = (_amount * makerFee) / basisPoints;
         
-        uint256 premiumPayable = (_amount * premium) / basicPoints;
+        uint256 premiumPayable = (_amount * premium) / basisPoints;
 
         uint256 totalPayable = makerFeePayable + premiumPayable;
 
@@ -224,7 +224,7 @@ contract CXDefaultSwap {
         uint256 makerFeePaid = (makerFeePayable * actualTransferAmount)/totalPayable;
         uint256 premiumPaid = actualTransferAmount - makerFeePaid;
 
-        uint256 actualCollateralToPurchase = premiumPaid * basicPoints/premium;
+        uint256 actualCollateralToPurchase = premiumPaid * basisPoints/premium;
 
         if (isVoterDefaulting) {
             uint256 voterFee = IOracle(oracleContract).getDefaultFeeAmount(makerFeePaid, address(this));
@@ -240,8 +240,8 @@ contract CXDefaultSwap {
 
         availableCollateralTotal -= (actualCollateralToPurchase - premiumPaid);
 
-        buyer[msg.sender].premiumPaid[epoch] += premiumPaid;
-        buyer[msg.sender].collateralCovered[epoch] += actualCollateralToPurchase;
+        buyers[msg.sender].premiumPaid[epoch] += premiumPaid;
+        buyers[msg.sender].collateralCovered[epoch] += actualCollateralToPurchase;
         emit PurchaseCollateral(msg.sender, _amount, actualCollateralToPurchase, premiumPaid, makerFeePaid);
     }
 
@@ -257,32 +257,32 @@ contract CXDefaultSwap {
         require(availableCollateral>0, "Nothing Deposited");
 
         //Check if previous interaction to roll deposit share into lock share
-        bool notInteracted = !seller[msg.sender].interactedThisEpoch[epoch];
-        bool notZeroDeposit =  seller[msg.sender].userShareDeposit != 0;
+        bool notInteracted = !sellers[msg.sender].interactedThisEpoch[epoch];
+        bool notZeroDeposit =  sellers[msg.sender].userShareDeposit != 0;
 
         
         if(notInteracted && notZeroDeposit){
 
             //If the seller is interacting for the first time in this epoch add his collateral share balance to his ShareLock
-            seller[msg.sender].userShareLock[epoch] = seller[msg.sender].userShareDeposit ;
+            sellers[msg.sender].userShareLock[epoch] = sellers[msg.sender].userShareDeposit ;
         
         }
 
         //Calculate reduction in userShareDeposit
-        uint256 userShareDepositChange =  seller[msg.sender].userShareDeposit * _amount / depositedCollateral;
+        uint256 userShareDepositChange =  sellers[msg.sender].userShareDeposit * _amount / depositedCollateral;
 
-        seller[msg.sender].userShareDeposit -= userShareDepositChange;
+        sellers[msg.sender].userShareDeposit -= userShareDepositChange;
         globalShareDeposit -= userShareDepositChange;
 
         //Calculate reduction in userShareLock
-        uint256 userShareLockChange = seller[msg.sender].userShareLock[epoch] * _amount / availableCollateral;
+        uint256 userShareLockChange = sellers[msg.sender].userShareLock[epoch] * _amount / availableCollateral;
 
-        seller[msg.sender].userShareLock[epoch] -= userShareLockChange;
+        sellers[msg.sender].userShareLock[epoch] -= userShareLockChange;
         globalShareLock[epoch] -= userShareLockChange;
 
 
         //Set boolean to true for deposited this epoch
-        seller[msg.sender].interactedThisEpoch[epoch] = true;
+        sellers[msg.sender].interactedThisEpoch[epoch] = true;
 
 
         //Increase Deposited collateral and Available Collateral totals post the calculations
@@ -296,9 +296,9 @@ contract CXDefaultSwap {
 
     /// @notice Allows existing buyer to claim collateral locked in the event of a default
     function claimcollateral() public {
-        uint256 payableAmount = buyer[msg.sender].collateralCovered[epoch];
+        uint256 payableAmount = buyers[msg.sender].collateralCovered[epoch];
         claimableCollateralTotal -= payableAmount;
-        buyer[msg.sender].collateralCovered[epoch] = 0;
+        buyers[msg.sender].collateralCovered[epoch] = 0;
 
         uint256 actualTransfer = _transferTo(payableAmount, msg.sender);
         emit ClaimCollateral(msg.sender, payableAmount, actualTransfer);
@@ -332,32 +332,34 @@ contract CXDefaultSwap {
         _rollEpoch(false);
         emit RollEpoch(msg.sender, maturityDate, epoch);
     }
-    
+
     function setDefaulted(uint256 percentageDefaulted) external validCaller {
         
         claimableCollateralTotal = collateralCoveredTotal * percentageDefaulted/basisPoints;
         depositedCollateralTotal -= claimableCollateralTotal;
         collateralCoveredTotal -= claimableCollateralTotal;
 
-        if (percentageDefaulted == basisPoints) defaulted = true;
+        if (percentageDefaulted == basisPoints) {
+            defaulted = true;
+            paused = true;
+        }
         emit SetDefaulted(msg.sender, percentageDefaulted);
     }
 
     function pause() external validCaller {
         paused = true;
-        emit SetPaused(msg.sender);
+        emit PausePool(msg.sender);
     }
 
     function unpause() external validCaller {
         require(!defaulted, "Contract has defaulted, use default reset");
 
         paused = false;
-        execute(false);
-        emit SetUnpaused(msg.sender);
+        emit UnPausePool(msg.sender);
     }
     
     
-    function resetAfterDefault(uint256 _newMaturityDate) external {
+    function resetAfterDefault() external {
         require(msg.sender == controller, "Unauthorized");
         require(defaulted, "Not defaulted");
 
@@ -369,14 +371,14 @@ contract CXDefaultSwap {
 
     function _rollEpoch(bool afterDefault) internal {
         
-        maturityDate = afterDefault ? block.timestamp : maturityDate + epochDays days;
+        maturityDate = afterDefault ? block.timestamp : maturityDate + (epochDays * 86400);
         epoch ++;
         collateralCoveredTotal = 0;
         availableCollateralTotal = depositedCollateralTotal;
         globalShareLock[epoch] = globalShareDeposit;
         defaulted = false;
 
-        if(_isVoterDefaulting) Voting(votingContract).payRecurringVoterFee();
+        if(isVoterDefaulting) Voting(votingContract).payRecurringVoterFee();
     }
 
     function _transferFrom(uint256 _amount) internal returns (uint256 actualTransferAmount) {
@@ -403,17 +405,17 @@ contract CXDefaultSwap {
  
     //Functions to calculate all relevant variables without loops
     function calculateDespositedCollateralUser(address _address) public view returns (uint256 userCollateral){
-        userCollateral = depositedCollateralTotal * seller[_address].userShareDeposit / globalShareDeposit;
+        userCollateral = depositedCollateralTotal * sellers[_address].userShareDeposit / globalShareDeposit;
     }
 
     function calculateAvailableCollateralUser(address _address) public view returns (uint256 availableCollateralUser){
-        if(seller[_address].interactedThisEpoch[epoch]){
+        if(sellers[_address].interactedThisEpoch[epoch]){
             //Calculate on Share Lock Ratio for this user
-            availableCollateralUser = availableCollateralTotal * seller[_address].userShareLock[epoch] / globalShareLock[epoch];
+            availableCollateralUser = availableCollateralTotal * sellers[_address].userShareLock[epoch] / globalShareLock[epoch];
 
         }else{
             //Calculate on Deposit share ratio
-            availableCollateralUser = availableCollateralTotal * seller[_address].userShareDeposit / globalShareLock[epoch];
+            availableCollateralUser = availableCollateralTotal * sellers[_address].userShareDeposit / globalShareLock[epoch];
         }
     }
 
@@ -422,7 +424,7 @@ contract CXDefaultSwap {
     }
 
     function getInteractedThisEpoch(address _address) public view returns (bool interacted){
-        interacted = seller[_address].interactedThisEpoch[epoch];
+        interacted = sellers[_address].interactedThisEpoch[epoch];
     }
 
 }

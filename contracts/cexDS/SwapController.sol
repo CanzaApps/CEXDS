@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ~0.8.18;
+pragma solidity 0.8.18;
 
 import "./CXDefaultSwap.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
@@ -188,7 +188,8 @@ contract SwapController is AccessControl {
         uint256 _premium,
         uint256 _makerFee,
         uint256 _initialMaturityDate,
-        uint256 _epochDays
+        uint256 _epochDays,
+        bool withVoterConsensus
 
     ) internal returns (address contractAddress) {
         require(votingContract != address(0x00), "Set Voting Contract first");
@@ -205,7 +206,8 @@ contract SwapController is AccessControl {
             maxNumberOfSellersPerPool,
             maxNumberOfBuyersPerPool,
             votingContract,
-            oracleContract
+            oracleContract,
+            withVoterConsensus
         );
 
         contractAddress = address(swapContract);

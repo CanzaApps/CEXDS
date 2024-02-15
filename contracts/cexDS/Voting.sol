@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ~0.8.18;
+pragma solidity 0.8.18;
 
 import "./CXDefaultSwap.sol";
 import "./SwapController.sol";
@@ -76,11 +76,11 @@ contract Voting is AccessControl {
     function payRecurringVoterFee() external {
 
         address poolPaying = msg.sender;
-        if(block.timestamp < lastVoterPaymentTimestamp[poolPaying] + CXDefaultSwap(poolPaying).epochDays() days) revert("Can not pay at this time");
+        if(block.timestamp < lastVoterPaymentTimestamp[poolPaying] + (CXDefaultSwap(poolPaying).epochDays() * 86400)) revert("Can not pay at this time");
         address[] memory votersToPay = poolVoters[poolPaying];
         if (votersToPay.length == 0) votersToPay = voterList;
 
-        uint256 totalAmountToPay = IOracle(oracleAddress).getRecurringFeeAmount(CXDefaultSwap(poolPaying).totalVoterFeeRemaining(), pool);
+        uint256 totalAmountToPay = IOracle(oracleAddress).getRecurringFeeAmount(CXDefaultSwap(poolPaying).totalVoterFeeRemaining(), poolPaying);
         CXDefaultSwap(poolPaying).deductFromVoterReserve(totalAmountToPay/10000);
 
         for (uint256 j = 0; j < votersToPay.length; j++) {
@@ -101,10 +101,7 @@ contract Voting is AccessControl {
         address _poolAddress
         , bool choice
         ) external {
-        uint8 voterCount = IOracle(oracleAddress).getNumberOfVotersRequired(_poolAddress);
-        address[] memory voters = poolHasSpecificVoters[_poolAddress] ? poolVoters[_poolAddress] : voterList;
 
-        require(voters <)
         require(poolHasSpecificVoters[_poolAddress] && isPoolVoter[_poolAddress][msg.sender] || 
         (!poolHasSpecificVoters[_poolAddress] && hasRole(VOTER_ROLE, msg.sender))
         , "Not authorized to vote for this Swap");
@@ -162,7 +159,7 @@ contract Voting is AccessControl {
     function setVotersForPool(address[] memory voters, address pool) external {
         if (msg.sender != controller && !hasRole(SUPER_ADMIN, msg.sender)) revert("Not authorized");
         if (pool == address(0)) revert("No zero address pool");
-        uint8 requiredVoterCount = IOracle(oracleAddress).getNumberOfVotersRequired(_poolAddress);
+        uint8 requiredVoterCount = IOracle(oracleAddress).getNumberOfVotersRequired(pool);
         if (voters.length != requiredVoterCount) revert("Incorrect number of voters supplied");
 
         poolHasSpecificVoters[pool] = true;
@@ -308,7 +305,7 @@ contract Voting is AccessControl {
             if (voterInfo.choice == payout) {
                 // Pay only to voters who are in the rational majority
                 
-                voterPerPoolAccumulatedRewards[voterInfo.voter][poolPaying] += amountToPay/Math.max(votersForTrue, voterCount - votersForTrue);
+                voterPerPoolAccumulatedRewards[voterInfo.voter][_poolAddress] += amountToPay/Math.max(votersForTrue, voterCount - votersForTrue);
             }
 
             if (!payout) delete voterHasVoted[_poolAddress][votesForPool[i].voter];
