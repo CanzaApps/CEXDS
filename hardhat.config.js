@@ -24,7 +24,7 @@ const config = {
         enabled: true,
         runs: 200
       },
-      viaIR: true,
+      viaIR: true
       /*, debug: {
         revertStrings: "strip"
       }*/
