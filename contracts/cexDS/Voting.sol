@@ -76,7 +76,7 @@ contract Voting is AccessControl {
     function payRecurringVoterFee() external {
 
         address poolPaying = msg.sender;
-        if(block.timestamp < lastVoterPaymentTimestamp[poolPaying] + CXDefaultSwap(poolPaying).epochDays() days) revert("Can not pay at this time");
+        if(block.timestamp < lastVoterPaymentTimestamp[poolPaying] + CXDefaultSwap(poolPaying).epochDays()) revert("Can not pay at this time");
         address[] memory votersToPay = poolVoters[poolPaying];
         if (votersToPay.length == 0) votersToPay = voterList;
 

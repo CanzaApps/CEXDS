@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.18;
+pragma solidity ~0.8.18;
 
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -22,6 +22,7 @@ contract CXDefaultSwap {
     uint256 public totalVoterFeePaid;
     uint256 public totalVoterFeeRemaining;
 
+
     //Epoch variables
     uint256 public epoch;
     uint256 public maturityDate;
@@ -41,22 +42,23 @@ contract CXDefaultSwap {
     uint256 public immutable maxSellerCount;
     uint256 public immutable maxBuyerCount;
     uint256 public constant basisPoints = 10000;
+    uint256 public percentageDefaulted;
 
     //Pause boolean (for after default event)
     bool private paused;
     bool public closed;
     bool public defaulted;
     bool public isVoterDefaulting;
+    bool public isRWAPool;
         
     mapping (uint256=>uint256) public globalShareLock;
+    mapping (uint256 => mapping(address => bool)) public epochClaimed;
 
     //Seller Data
     struct SellerData {
-
         uint256 userShareDeposit;
         mapping (uint256=>uint256) userShareLock;
         mapping (uint256=>bool) interactedThisEpoch;
-
     }
 
     //Buyer Data
@@ -108,7 +110,9 @@ contract CXDefaultSwap {
         uint256 _maxBuyerCount,
         address _votingContract,
         address _oracle,
-        bool _isVoterDefaulting
+        bool _isVoterDefaulting,
+        address _controller,
+        bool _isRWAPool
     ) {
         require(_votingContract.isContract() && _oracle.isContract() && _currency.isContract(), 
         "Address supplied for Voting, Currency, or Oracle, contract is invalid");
@@ -125,7 +129,8 @@ contract CXDefaultSwap {
         maxBuyerCount = _maxBuyerCount;
         votingContract = _votingContract;
         oracleContract = _oracle;
-        controller = msg.sender;
+        controller = _controller;
+        isRWAPool = _isRWAPool;
         isVoterDefaulting = msg.sender;
     }
 
@@ -150,23 +155,17 @@ contract CXDefaultSwap {
         bool notZeroDeposit =  seller[msg.sender].userShareDeposit != 0;
 
         if(notInteracted && notZeroDeposit){
-
             //If the seller is interacting for the first time in this epoch add his collateral share balance to his ShareLock
             seller[msg.sender].userShareLock[epoch] = seller[msg.sender].userShareDeposit;
-        
         }
         
         //Handle the Deposit share changes
         uint256 userShareDepositChange;
 
         if (globalShareDeposit == 0 || depositedCollateralTotal == 0){
-
             userShareDepositChange = actualTransferAmount;
-
         }else{
-
             userShareDepositChange = globalShareDeposit * actualTransferAmount / depositedCollateralTotal;
-
         }
 
         //Increase userShareDeposit Ratio variables
@@ -296,13 +295,20 @@ contract CXDefaultSwap {
 
     /// @notice Allows existing buyer to claim collateral locked in the event of a default
     function claimcollateral() public {
-        uint256 payableAmount = buyer[msg.sender].collateralCovered[epoch];
-        claimableCollateralTotal -= payableAmount;
-        buyer[msg.sender].collateralCovered[epoch] = 0;
-
-        uint256 actualTransfer = _transferTo(payableAmount, msg.sender);
-        emit ClaimCollateral(msg.sender, payableAmount, actualTransfer);
-
+        if(isRWAPool){
+            require(!epochClaimed[epoch][msg.sender], "You have already claimed collateral");
+            uint256 payableAmount = buyer[msg.sender].collateralCovered[epoch]* percentageDefaulted/basisPoints;
+            claimableCollateralTotal -= payableAmount;
+            uint256 actualTransfer = _transferTo(payableAmount, msg.sender);
+            emit ClaimCollateral(msg.sender, payableAmount, actualTransfer);
+        } else {
+            uint256 payableAmount = buyer[msg.sender].collateralCovered[epoch];
+            claimableCollateralTotal -= payableAmount;
+            buyer[msg.sender].collateralCovered[epoch] = 0;
+            uint256 actualTransfer = _transferTo(payableAmount, msg.sender);
+            emit ClaimCollateral(msg.sender, payableAmount, actualTransfer);
+        }
+       
     }
 
     /// @notice Provides a means to maintain running voter reserve balance when paying voter fees on the voting contract
@@ -332,15 +338,20 @@ contract CXDefaultSwap {
         _rollEpoch(false);
         emit RollEpoch(msg.sender, maturityDate, epoch);
     }
-    
-    function setDefaulted(uint256 percentageDefaulted) external validCaller {
-        
-        claimableCollateralTotal = collateralCoveredTotal * percentageDefaulted/basisPoints;
+
+    function setDefaulted(uint256 _percentageDefaulted) external validCaller {
+        claimableCollateralTotal = collateralCoveredTotal * _percentageDefaulted/basisPoints;
         depositedCollateralTotal -= claimableCollateralTotal;
         collateralCoveredTotal -= claimableCollateralTotal;
 
-        if (percentageDefaulted == basisPoints) defaulted = true;
-        emit SetDefaulted(msg.sender, percentageDefaulted);
+        if (_percentageDefaulted == basisPoints) defaulted = true;
+
+        if(isRWAPool){
+            percentageDefaulted += _percentageDefaulted;
+            epoch += epoch;
+        }
+
+        emit SetDefaulted(msg.sender, _percentageDefaulted);
     }
 
     function pause() external validCaller {
@@ -369,7 +380,7 @@ contract CXDefaultSwap {
 
     function _rollEpoch(bool afterDefault) internal {
         
-        maturityDate = afterDefault ? block.timestamp : maturityDate + epochDays days;
+        maturityDate = afterDefault ? block.timestamp : maturityDate + epochDays;
         epoch ++;
         collateralCoveredTotal = 0;
         availableCollateralTotal = depositedCollateralTotal;

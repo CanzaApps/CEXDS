@@ -75,10 +75,11 @@ contract SwapController is AccessControl {
         uint256 _makerFee,
         uint256 _initialMaturityDate,
         uint256 _epochDays,
-        bool withVoterConsensus
-
+        bool withVoterConsensus,
+            address _controller,
+        bool _isRWAPool
     ) public isAdmin {
-        address poolAddress = _createSwapContract(_entityName, _entityUrl, _currency, _premium, _makerFee, _initialMaturityDate, _epochDays, withVoterConsensus);
+        address poolAddress = _createSwapContract(_entityName, _entityUrl, _currency, _premium, _makerFee, _initialMaturityDate, _epochDays, withVoterConsensus, _controller, _isRWAPool);
         emit SwapContractCreated(poolAddress, _currency, _premium, _initialMaturityDate, _epochDays, withVoterConsensus, false, msg.sender);
     }
 
@@ -104,9 +105,10 @@ contract SwapController is AccessControl {
         bool withVoterConsensus,
         address _owner,
         address[] memory _voters,
-        address _controller
+        address _controller,
+        bool _isRWAPool
     ) public isAdmin {
-        address poolAddress = _createSwapContract(_entityName, _entityUrl, _currency, _premium, _makerFee, _initialMaturityDate, _epochDays, withVoterConsensus);
+        address poolAddress = _createSwapContract(_entityName, _entityUrl, _currency, _premium, _makerFee, _initialMaturityDate, _epochDays, withVoterConsensus, _controller, _isRWAPool);
         bytes32 ownerRole = getPoolOwnerRole(poolAddress);
         _setRoleAdmin(ownerRole, SUPER_ADMIN);
         _grantRole(ownerRole, _owner);
@@ -189,7 +191,8 @@ contract SwapController is AccessControl {
         uint256 _makerFee,
         uint256 _initialMaturityDate,
         uint256 _epochDays,
-        address _controller
+        address _controller,
+        bool _isRWAPool
     ) internal returns (address contractAddress) {
         require(votingContract != address(0x00), "Set Voting Contract first");
         require(oracleContract != address(0x00), "Set Oracle Contract first");
@@ -206,7 +209,8 @@ contract SwapController is AccessControl {
             maxNumberOfBuyersPerPool,
             votingContract,
             oracleContract,
-            _controller
+            _controller,
+            _isRWAPool
         );
 
         contractAddress = address(swapContract);
