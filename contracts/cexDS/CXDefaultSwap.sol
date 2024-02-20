@@ -32,7 +32,6 @@ contract CXDefaultSwap {
     uint256 public premiumPaidTotal;
     uint256 public unclaimedPremiumTotal;
     uint256 public collateralCoveredTotal;
-    uint256 public claimableCollateralTotal;
 
     uint256 public globalShareDeposit;
     //Premium price in bps
@@ -47,8 +46,6 @@ contract CXDefaultSwap {
     bool public closed;
     bool public defaulted;
     bool public isVoterDefaulting;
-        
-    mapping (uint256=>uint256) public globalShareLock;
 
     //Seller Data
     struct SellerData {
@@ -69,6 +66,10 @@ contract CXDefaultSwap {
 
     mapping (address=>SellerData) public sellers;
     mapping (address=>BuyerData) public buyers;
+    mapping (uint256=>uint256) public claimableCollateralTotal;
+    mapping (uint256=>uint256) public percentageClaimable;
+    mapping (uint256=>uint256) public globalShareLock;
+    mapping (address=>uint256) public buyerLastCollateralClaimEpoch;
 
     // _actualDepositedAmount would be less than _amount in event that the ERC20 token deposited implements fee on transfer
     event Deposit(address indexed _seller, uint256 _amount, uint256 _actualdepositedAmount);
@@ -211,20 +212,14 @@ contract CXDefaultSwap {
         //Don't allow deposits during Pause after default event
         require(!paused,"Contract Paused");
         require(!closed,"Pool closed");
-        
-        uint256 makerFeePayable = (_amount * makerFee) / basisPoints;
-        
-        uint256 premiumPayable = (_amount * premium) / basisPoints;
-
-        uint256 totalPayable = makerFeePayable + premiumPayable;
+        (uint256 totalPayable, uint256 premiumPaid, uint256 makerFeePaid, uint256 defaultCoverage) = getCostOfPurchase(_amount);
 
         uint256 actualTransferAmount = _transferFrom(totalPayable);
 
-        //backpropagate the actualTransferAmount in the event that there was a fee on transfer, and get actual makerFeePaid & premium & collateral
-        uint256 makerFeePaid = (makerFeePayable * actualTransferAmount)/totalPayable;
-        uint256 premiumPaid = actualTransferAmount - makerFeePaid;
-
-        uint256 actualCollateralToPurchase = premiumPaid * basisPoints/premium;
+        if (actualTransferAmount != totalPayable) {
+            //backpropagate the actualTransferAmount in the event that there was a fee on transfer, and get actual makerFeePaid & premium & collateral
+            (_amount, premiumPaid, makerFeePaid, defaultCoverage) = doBackPropagation(actualTransferAmount);
+        }
 
         if (isVoterDefaulting) {
             uint256 voterFee = IOracle(oracleContract).getDefaultFeeAmount(makerFeePaid, address(this));
@@ -236,13 +231,14 @@ contract CXDefaultSwap {
         depositedCollateralTotal += premiumPaid;
         premiumPaidTotal += premiumPaid;
 
-        collateralCoveredTotal += actualCollateralToPurchase;
+        collateralCoveredTotal += _amount;
 
-        availableCollateralTotal -= (actualCollateralToPurchase - premiumPaid);
+        availableCollateralTotal -= (_amount - premiumPaid);
+        claimableCollateralTotal[epoch] += defaultCoverage;
 
         buyers[msg.sender].premiumPaid[epoch] += premiumPaid;
-        buyers[msg.sender].collateralCovered[epoch] += actualCollateralToPurchase;
-        emit PurchaseCollateral(msg.sender, _amount, actualCollateralToPurchase, premiumPaid, makerFeePaid);
+        buyers[msg.sender].collateralCovered[epoch] += _amount;
+        emit PurchaseCollateral(msg.sender, _amount, _amount, premiumPaid, makerFeePaid);
     }
 
     /// @notice Allows existing seller to withdraw collateral available to them. Locked collateral can not be withdrawn.
@@ -295,13 +291,21 @@ contract CXDefaultSwap {
     }
 
     /// @notice Allows existing buyer to claim collateral locked in the event of a default
-    function claimcollateral() public {
-        uint256 payableAmount = buyers[msg.sender].collateralCovered[epoch];
-        claimableCollateralTotal -= payableAmount;
-        buyers[msg.sender].collateralCovered[epoch] = 0;
+    function claimCollateral() public {
+        uint256 transferAmount;
 
-        uint256 actualTransfer = _transferTo(payableAmount, msg.sender);
-        emit ClaimCollateral(msg.sender, payableAmount, actualTransfer);
+        for (uint256 i = buyerLastCollateralClaimEpoch[msg.sender]; i <= epoch; i++)  {
+            if (claimableCollateralTotal[i] == 0) continue;
+            uint256 x = buyers[msg.sender].collateralCovered[i]*percentageClaimable[i]/basisPoints;
+            claimableCollateralTotal[i] -= x;
+            buyers[msg.sender].collateralCovered[i] = 0;
+            transferAmount += x;
+        }
+
+        if(transferAmount == 0) revert("No collateral available to claim");
+        buyerLastCollateralClaimEpoch[msg.sender] = epoch;
+        uint256 actualTransfer = _transferTo(transferAmount, msg.sender);
+        emit ClaimCollateral(msg.sender, transferAmount, actualTransfer);
 
     }
 
@@ -334,10 +338,12 @@ contract CXDefaultSwap {
     }
 
     function setDefaulted(uint256 percentageDefaulted) external validCaller {
+        uint256 amountClaimable = collateralCoveredTotal * percentageDefaulted / basisPoints;
         
-        claimableCollateralTotal = collateralCoveredTotal * percentageDefaulted/basisPoints;
-        depositedCollateralTotal -= claimableCollateralTotal;
-        collateralCoveredTotal -= claimableCollateralTotal;
+        claimableCollateralTotal[epoch] = amountClaimable;
+        percentageClaimable[epoch] = percentageDefaulted;
+        depositedCollateralTotal -= amountClaimable;
+        collateralCoveredTotal -= amountClaimable;
 
         if (percentageDefaulted == basisPoints) {
             defaulted = true;
@@ -425,6 +431,32 @@ contract CXDefaultSwap {
 
     function getInteractedThisEpoch(address _address) public view returns (bool interacted){
         interacted = sellers[_address].interactedThisEpoch[epoch];
+    }
+
+    function getCostOfPurchase(uint256 _amountToPurchase) public view returns (
+        uint256 totalPayable,
+        uint256 premiumPayable,
+        uint256 makerFeePayable,
+        uint256 existingDefaultCoverage
+    ) {
+        makerFeePayable = (_amountToPurchase * makerFee) / basisPoints;
+        premiumPayable = (_amountToPurchase * premium) / basisPoints;
+        existingDefaultCoverage = (percentageClaimable[epoch] * _amountToPurchase)/basisPoints;
+        totalPayable = makerFeePayable + premiumPayable + existingDefaultCoverage;
+    }
+
+    function doBackPropagation(uint256 totalAmountPaid) internal view returns (
+        uint256 actualCollateralToPurchase,
+        uint256 actualPremiumPaid,
+        uint256 actualMakerFeePaid,
+        uint256 actualDefaultCoverage
+    ) {
+        uint256 denominator = basisPoints + (makerFee + premium + percentageClaimable[epoch]);
+        actualDefaultCoverage = (percentageClaimable[epoch] * totalAmountPaid)/denominator;
+        actualPremiumPaid = (premium * totalAmountPaid)/denominator;
+        actualMakerFeePaid = totalAmountPaid - (actualPremiumPaid + actualDefaultCoverage);
+
+        actualCollateralToPurchase = actualPremiumPaid * basisPoints/premium;
     }
 
 }
