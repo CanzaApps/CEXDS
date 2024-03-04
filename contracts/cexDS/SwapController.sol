@@ -24,7 +24,6 @@ contract SwapController is AccessControl {
     event SwapContractCreated(address indexed _poolAddress
     , address _poolToken
     , uint256 _premium
-    , uint256 _initialMaturityTimestamp
     , uint256 _epochDays
     , bool _withVoterConsensus
     , bool isThirdParty
@@ -64,7 +63,6 @@ contract SwapController is AccessControl {
      * @param _entityUrl URL for the specific entity
      * @param _currency Token address, for which loan was taken in the specified entity. Token must implement the ERC-20 standard.
      * @param _premium Premium percentage desired for credit swap pool.
-     * @param _initialMaturityDate Date for pool maturity.
      * @param _epochDays Number of days for increment of the maturity date after every cycle without a default
      */
     function createSwapContract(
@@ -73,13 +71,12 @@ contract SwapController is AccessControl {
         address _currency,
         uint256 _premium,
         uint256 _makerFee,
-        uint256 _initialMaturityDate,
         uint256 _epochDays,
         bool withVoterConsensus
 
     ) public isAdmin {
-        address poolAddress = _createSwapContract(_entityName, _entityUrl, _currency, _premium, _makerFee, _initialMaturityDate, _epochDays, withVoterConsensus);
-        emit SwapContractCreated(poolAddress, _currency, _premium, _initialMaturityDate, _epochDays, withVoterConsensus, false, msg.sender);
+        address poolAddress = _createSwapContract(_entityName, _entityUrl, _currency, _premium, _makerFee, _epochDays, withVoterConsensus);
+        emit SwapContractCreated(poolAddress, _currency, _premium, _epochDays, withVoterConsensus, false, msg.sender);
     }
 
     /**
@@ -88,7 +85,6 @@ contract SwapController is AccessControl {
      * @param _entityUrl URL for the specific entity
      * @param _currency Token address, for which loan was taken in the specified entity. Token must implement the ERC-20 standard.
      * @param _premium Premium percentage desired for credit swap pool.
-     * @param _initialMaturityDate Date for pool maturity.
      * @param _epochDays Number of days for increment of the maturity date after every cycle without a default
      * @param _owner the address of the owner of the 3rd party pool
      * @param _voters array of intended voter addresses
@@ -99,19 +95,18 @@ contract SwapController is AccessControl {
         address _currency,
         uint256 _premium,
         uint256 _makerFee,
-        uint256 _initialMaturityDate,
         uint256 _epochDays,
         bool withVoterConsensus,
         address _owner,
         address[] memory _voters
 
     ) public isAdmin {
-        address poolAddress = _createSwapContract(_entityName, _entityUrl, _currency, _premium, _makerFee, _initialMaturityDate, _epochDays, withVoterConsensus);
+        address poolAddress = _createSwapContract(_entityName, _entityUrl, _currency, _premium, _makerFee, _epochDays, withVoterConsensus);
         bytes32 ownerRole = getPoolOwnerRole(poolAddress);
         _setRoleAdmin(ownerRole, SUPER_ADMIN);
         _grantRole(ownerRole, _owner);
         Voting(votingContract).setVotersForPool(_voters, poolAddress);
-        emit SwapContractCreated(poolAddress, _currency, _premium, _initialMaturityDate, _epochDays, withVoterConsensus, false, msg.sender);
+        emit SwapContractCreated(poolAddress, _currency, _premium, _epochDays, withVoterConsensus, false, msg.sender);
     }
 
     /**
@@ -187,7 +182,6 @@ contract SwapController is AccessControl {
         address _currency,
         uint256 _premium,
         uint256 _makerFee,
-        uint256 _initialMaturityDate,
         uint256 _epochDays,
         bool withVoterConsensus
 
@@ -201,7 +195,6 @@ contract SwapController is AccessControl {
             _currency,
             _premium,
             _makerFee,
-            _initialMaturityDate,
             _epochDays,
             maxNumberOfSellersPerPool,
             maxNumberOfBuyersPerPool,

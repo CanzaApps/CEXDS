@@ -30,7 +30,6 @@ contract CXDefaultSwap {
     uint256 public depositedCollateralTotal;
     uint256 public availableCollateralTotal;
     uint256 public premiumPaidTotal;
-    uint256 public unclaimedPremiumTotal;
     uint256 public collateralCoveredTotal;
 
     uint256 public globalShareDeposit;
@@ -71,6 +70,37 @@ contract CXDefaultSwap {
     mapping (uint256=>uint256) public globalShareLock;
     mapping (address=>uint256) public buyerLastCollateralClaimEpoch;
 
+    struct UserPoolData {
+        bool isSeller;
+        bool isBuyer;
+        uint256 depositedCollateral;
+        uint256 availableCollateral;
+        uint256 lockedCollateral;
+        uint256 collateralCovered;
+        uint256 claimableCollateral;
+    }
+
+    //Pool Data
+    struct PoolData {
+        string entityName;
+        address poolAddress;
+        string status;
+        address poolToken;
+        uint256 premium;
+        uint256 makerFee;
+        uint256 maturityDate;
+        uint256 epochCount;
+        uint256 epochDays;
+        uint256 totalVoterFeePaid;
+        uint256 totalVoterFeeRemaining;
+        uint256 depositedCollateralTotal;
+        uint256 availableCollateralTotal;
+        uint256 premiumPaidTotal;
+        uint256 collateralCoveredTotal;
+        uint256 claimableCollateralTotal;
+        UserPoolData userData;
+    }
+
     // _actualDepositedAmount would be less than _amount in event that the ERC20 token deposited implements fee on transfer
     event Deposit(address indexed _seller, uint256 _amount, uint256 _actualdepositedAmount);
     event Withdraw(address indexed _seller, uint256 _amount, uint256 _actualwithdrawAmount);
@@ -90,7 +120,6 @@ contract CXDefaultSwap {
     /// @param _currency the ERC20 standard token on which the pool is dependent
     /// @param _premium the premium percentage to be paid on every collateral purchase marked up by 10**4
     /// @param _makerFee the percentage to be paid on every purchase to amount to the treasury and voter reserve, marked up by 10**4
-    /// @param _initialMaturityDate Initial timestamp set for the swap pool to mature, in the event of no default
     /// @param _epochDays number of days with which to update the maturity timestamp after a maturation cycle has elapsed
     /// @param _maxSellerCount Maximum number of sellers allowed
     /// @param _maxBuyerCount Maximum number of collateral buyers allowed
@@ -103,7 +132,6 @@ contract CXDefaultSwap {
         address _currency,
         uint256 _premium,
         uint256 _makerFee,
-        uint256 _initialMaturityDate,
         uint256 _epochDays,
         uint256 _maxSellerCount,
         uint256 _maxBuyerCount,
@@ -113,14 +141,13 @@ contract CXDefaultSwap {
     ) {
         require(_votingContract.isContract() && _oracle.isContract() && _currency.isContract(), 
         "Address supplied for Voting, Currency, or Oracle, contract is invalid");
-        require(_initialMaturityDate > block.timestamp, "Invalid Maturity Date set");
         require(_premium < basisPoints && _makerFee < basisPoints, "Premium, and maker fee, can not be 100% or above");
         currency = IERC20(_currency);
         entityName = _entityName;
         entityUrl = _entityUrl;
         premium = _premium;
         makerFee = _makerFee;
-        maturityDate = _initialMaturityDate;
+        maturityDate = block.timestamp + (_epochDays * 86400);
         epochDays = _epochDays;
         maxSellerCount = _maxSellerCount;
         maxBuyerCount = _maxBuyerCount;
@@ -433,6 +460,17 @@ contract CXDefaultSwap {
         interacted = sellers[_address].interactedThisEpoch[epoch];
     }
 
+    function getBuyerClaimableCollateral(address _buyer) public view returns (
+        uint256 transferAmount
+    ) {
+
+        for (uint256 i = buyerLastCollateralClaimEpoch[_buyer]; i <= epoch; i++)  {
+            if (claimableCollateralTotal[i] == 0) continue;
+            uint256 x = buyers[_buyer].collateralCovered[i]*percentageClaimable[i]/basisPoints;
+            transferAmount += x;
+        }
+    }
+
     function getCostOfPurchase(uint256 _amountToPurchase) public view returns (
         uint256 totalPayable,
         uint256 premiumPayable,
@@ -457,6 +495,42 @@ contract CXDefaultSwap {
         actualMakerFeePaid = totalAmountPaid - (actualPremiumPaid + actualDefaultCoverage);
 
         actualCollateralToPurchase = actualPremiumPaid * basisPoints/premium;
+    }
+
+    function getPoolData(address _user) public view returns (PoolData memory poolData) {
+        uint256 userDepositedCollateral = calculateDespositedCollateralUser(_user);
+        uint256 userAvailableCollateral = calculateAvailableCollateralUser(_user);
+        uint256 userLockedCollateral = calculateLockedCollateralUser(_user);
+        uint256 userCollateralCovered = buyers[_user].collateralCovered[epoch];
+        uint256 userClaimableCollateral = getBuyerClaimableCollateral(_user);
+
+        poolData = PoolData(
+            entityName
+            , address(this)
+            , closed ? "Closed" : defaulted ? "Defaulted" : paused ? "Paused" : "Current"
+            , address(currency)
+            , premium
+            , makerFee
+            , maturityDate
+            , epoch
+            , epochDays
+            , totalVoterFeePaid
+            , totalVoterFeeRemaining
+            , depositedCollateralTotal
+            , availableCollateralTotal
+            , premiumPaidTotal
+            , collateralCoveredTotal
+            , claimableCollateralTotal[epoch]
+            , UserPoolData(
+                userDepositedCollateral > 0 || userLockedCollateral > 0
+                , userCollateralCovered > 0 || userClaimableCollateral > 0
+                , userDepositedCollateral
+                , userAvailableCollateral
+                , userLockedCollateral
+                , userCollateralCovered
+                , userClaimableCollateral
+            )
+        );
     }
 
 }

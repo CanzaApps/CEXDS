@@ -11,6 +11,7 @@ require("@openzeppelin/hardhat-upgrades");
 require("hardhat-contract-sizer");
 require("@nomiclabs/hardhat-ethers");
 require("@nomiclabs/hardhat-waffle");
+require("./scripts/tasks");
 
 const dotenv = require('dotenv');
 
