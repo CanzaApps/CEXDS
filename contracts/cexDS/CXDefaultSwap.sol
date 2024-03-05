@@ -83,6 +83,7 @@ contract CXDefaultSwap {
     //Pool Data
     struct PoolData {
         string entityName;
+        string entityUrl;
         address poolAddress;
         string status;
         address poolToken;
@@ -438,10 +439,12 @@ contract CXDefaultSwap {
  
     //Functions to calculate all relevant variables without loops
     function calculateDespositedCollateralUser(address _address) public view returns (uint256 userCollateral){
+        if (globalShareDeposit == 0) return userCollateral;
         userCollateral = depositedCollateralTotal * sellers[_address].userShareDeposit / globalShareDeposit;
     }
 
     function calculateAvailableCollateralUser(address _address) public view returns (uint256 availableCollateralUser){
+        if (globalShareLock[epoch] == 0) return availableCollateralUser;
         if(sellers[_address].interactedThisEpoch[epoch]){
             //Calculate on Share Lock Ratio for this user
             availableCollateralUser = availableCollateralTotal * sellers[_address].userShareLock[epoch] / globalShareLock[epoch];
@@ -506,6 +509,7 @@ contract CXDefaultSwap {
 
         poolData = PoolData(
             entityName
+            , entityUrl
             , address(this)
             , closed ? "Closed" : defaulted ? "Defaulted" : paused ? "Paused" : "Current"
             , address(currency)
