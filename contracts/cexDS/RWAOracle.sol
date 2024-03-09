@@ -10,7 +10,8 @@ contract RWAOracle is Ownable, IRWAOracle {
     mapping(address => uint256) defaultedTVL;
     mapping(address => uint256) percentageDefaulted;
 
-    function setPools(address _pool, uint256 _tvl) external onlyOwner {
+
+    function setPool(address _pool, uint256 _tvl) external onlyOwner {
         TVL[_pool] = _tvl;
         defaultedTVL[_pool] = 0;
         percentageDefaulted[_pool] = 0;
@@ -22,6 +23,7 @@ contract RWAOracle is Ownable, IRWAOracle {
     }
 
     function resetPool(address _pool) external onlyOwner {
+        TVL[_pool] = 0;
         defaultedTVL[_pool] = 0;
         percentageDefaulted[_pool] = 0;
     }
