@@ -92,6 +92,7 @@ contract CXDefaultSwap {
         uint256 maturityDate;
         uint256 epochCount;
         uint256 epochDays;
+        bool defaultsByVoterConsensus;
         uint256 totalVoterFeePaid;
         uint256 totalVoterFeeRemaining;
         uint256 depositedCollateralTotal;
@@ -99,6 +100,7 @@ contract CXDefaultSwap {
         uint256 premiumPaidTotal;
         uint256 collateralCoveredTotal;
         uint256 claimableCollateralTotal;
+        uint256 percentageClaimable;
         UserPoolData userData;
     }
 
@@ -114,6 +116,7 @@ contract CXDefaultSwap {
     event ResetAfterDefault(address caller);
     event PausePool(address caller);
     event UnPausePool(address caller);
+    event ClosePool(address caller);
 
     /// @dev Deploys contract and initializes state variables
     /// @param _entityName the name of the specific entity which the Swap pool represents
@@ -169,8 +172,7 @@ contract CXDefaultSwap {
     /// NOTE: The eventual deposited collateral may not match the value of _amount, if the token implements fee on transfer
     function deposit(uint256 _amount) public {
 
-        require(!paused,"Contract Paused");
-        require(!closed,"Pool closed");
+        _execute();
         
         uint256 actualTransferAmount = _transferFrom(_amount);
 
@@ -234,6 +236,7 @@ contract CXDefaultSwap {
     /// @dev Call to execute must be done to validate actual balances before proceeding with purchase
     /// @param _amount intended amount of collateral to purchase
     function purchase(uint256 _amount) public {
+        _execute();
 
         require(_amount <= availableCollateralTotal, "Not enough to sell");
 
@@ -273,6 +276,7 @@ contract CXDefaultSwap {
     /// @dev Call to execute must be done to validate actual balances before proceeding with withdraw
     /// @param _amount intended amount of collateral to withdraw
     function withdraw(uint256 _amount) public {
+        if (!paused && !closed) _execute();
 
         uint256 depositedCollateral = calculateDespositedCollateralUser(msg.sender);
         uint256 availableCollateral = calculateAvailableCollateralUser(msg.sender);  
@@ -356,16 +360,24 @@ contract CXDefaultSwap {
         emit WithdrawFromBalance(_recipient, _amount, actualAmountSent);
     }
 
-    //Go next period
+    /// @notice Rolls the pool cycle to the next one. 
+    /// The previous maturityTimestamp must have been exceeded before this is called.
+    /// Existing locked collateral is unlocked and made available within the pool again
     function rollEpoch() public {
         require(msg.sender == controller, "Unauthorized");
         require(block.timestamp >= maturityDate, "Maturity Date not yet reached");
 
-        _rollEpoch(false);
+        _execute();
         emit RollEpoch(msg.sender, maturityDate, epoch);
     }
 
-    function setDefaulted(uint256 percentageDefaulted) external validCaller {
+    /// @notice Set a default action on a pool. Allows for partial default by tracking the percentage claimable on each call.
+    /// Partial default is only supported on pools without voter consensus functionality
+    /// @dev Should only set defaulted state to true in event of a total default, i.e, the @param percentageDefaulted is 100%
+    function setDefaulted(uint256 percentageDefaulted) external {
+        require((isVoterDefaulting && msg.sender == votingContract) || (!isVoterDefaulting && msg.sender == controller),
+        "Unauthorized");
+        _execute();
         uint256 amountClaimable = collateralCoveredTotal * percentageDefaulted / basisPoints;
         
         claimableCollateralTotal[epoch] = amountClaimable;
@@ -380,39 +392,63 @@ contract CXDefaultSwap {
         emit SetDefaulted(msg.sender, percentageDefaulted);
     }
 
+    /// @notice Pause the pool state, preventing deposits, purchases and default action.
+    /// Withdrawals and collateral claims are still permitted when a pool is paused.
     function pause() external validCaller {
         paused = true;
         emit PausePool(msg.sender);
     }
 
+    /// @notice Revert the impact of a pause action on a pool.
     function unpause() external validCaller {
         require(!defaulted, "Contract has defaulted, use default reset");
 
         paused = false;
+        _execute();
         emit UnPausePool(msg.sender);
     }
     
-    
+    /// @notice Recover a pool to be reused again after a total default action had been previously initiated.
+    /// @dev Call restricted to the SUPER_ADMIN on SwapController only. See {SwapController.resetPoolAfterDefault}.
     function resetAfterDefault() external {
         require(msg.sender == controller, "Unauthorized");
         require(defaulted, "Not defaulted");
-
-        defaulted = false;
         paused = false;
-        _rollEpoch(true);
+        _execute();
         emit ResetAfterDefault(msg.sender);
     }
 
-    function _rollEpoch(bool afterDefault) internal {
-        
-        maturityDate = afterDefault ? block.timestamp : maturityDate + (epochDays * 86400);
-        epoch ++;
-        collateralCoveredTotal = 0;
-        availableCollateralTotal = depositedCollateralTotal;
-        globalShareLock[epoch] = globalShareDeposit;
-        defaulted = false;
+    /// @notice Close pool against any future actions, except collateral claims and withdrawals.
+    /// @dev Should revert all locaked collateral to be available for withdrawal
+    function closePool() external validCaller {
+        require(msg.sender == controller, "Unauthorized");
+        closed = true;
+        _execute();
+        emit ClosePool(msg.sender);
+    }
 
-        if(isVoterDefaulting) Voting(votingContract).payRecurringVoterFee();
+    function _execute() internal virtual {
+        require(!paused, "Contract is paused");
+        require(!closed, "Contract is closed");
+        bool matured = block.timestamp > maturityDate;
+
+        if (closed) {
+            maturityDate = block.timestamp + (epochDays * 86400);
+            epoch++;
+            collateralCoveredTotal = 0;
+            availableCollateralTotal = depositedCollateralTotal;
+            globalShareLock[epoch] = globalShareDeposit;
+            
+        } else if (matured || defaulted) {
+            maturityDate = (defaulted ? block.timestamp : maturityDate) + (epochDays * 86400);
+            epoch ++;
+            collateralCoveredTotal = 0;
+            availableCollateralTotal = depositedCollateralTotal;
+            globalShareLock[epoch] = globalShareDeposit;
+            defaulted = false;
+
+            if(matured && isVoterDefaulting) Voting(votingContract).payRecurringVoterFee();
+        }
     }
 
     function _transferFrom(uint256 _amount) internal returns (uint256 actualTransferAmount) {
@@ -518,6 +554,7 @@ contract CXDefaultSwap {
             , maturityDate
             , epoch
             , epochDays
+            , isVoterDefaulting
             , totalVoterFeePaid
             , totalVoterFeeRemaining
             , depositedCollateralTotal
@@ -525,6 +562,7 @@ contract CXDefaultSwap {
             , premiumPaidTotal
             , collateralCoveredTotal
             , claimableCollateralTotal[epoch]
+            , percentageClaimable[epoch]
             , UserPoolData(
                 userDepositedCollateral > 0 || userLockedCollateral > 0
                 , userCollateralCovered > 0 || userClaimableCollateral > 0

@@ -30,6 +30,7 @@ contract SwapController is AccessControl {
     , address poolOwner);
     event PoolPaused(address indexed _poolAddress, address _sender);
     event PoolUnpaused(address indexed _poolAddress, address _sender);
+    event PoolDefaulted(address indexed _poolAddress, uint256 _percentageDefaulted, address _sender);
     event PoolReset(address indexed _poolAddress, address _sender, uint256 _newMaturityDate);
     event PoolClosed(address indexed _poolAddress);
     event RollPoolEpoch(address indexed _poolAddress, address _sender);
@@ -105,7 +106,7 @@ contract SwapController is AccessControl {
         bytes32 ownerRole = getPoolOwnerRole(poolAddress);
         _setRoleAdmin(ownerRole, SUPER_ADMIN);
         _grantRole(ownerRole, _owner);
-        Voting(votingContract).setVotersForPool(_voters, poolAddress);
+        if (withVoterConsensus) Voting(votingContract).setVotersForPool(_voters, poolAddress);
         emit SwapContractCreated(poolAddress, _currency, _premium, _epochDays, withVoterConsensus, false, msg.sender);
     }
 
@@ -125,6 +126,17 @@ contract SwapController is AccessControl {
     function setPoolUnpaused(address _add) external onlyRole(SUPER_ADMIN) {
         ICreditDefaultSwap(_add).unpause();
         emit PoolUnpaused(_add, msg.sender);
+    }
+
+    /**
+     * @notice implements a default action on a Swap pool. 
+     * Only exists for pools that do not require voter consensus for a default
+     * Would revert if the pool requires voter consensus. See {CXDefaultSwap.setDefaulted}
+     * @param _add the swap pool address
+     */
+    function setPoolDefaulted(address _add, uint256 _percentageDefaulted) external onlyRole(SUPER_ADMIN) {
+        ICreditDefaultSwap(_add).setDefaulted(_percentageDefaulted);
+        emit PoolDefaulted(_add, _percentageDefaulted, msg.sender);
     }
     
     /**

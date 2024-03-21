@@ -2,7 +2,7 @@
 pragma solidity 0.8.18;
 
 interface ICreditDefaultSwap {
-    function setDefaulted() external;
+    function setDefaulted(uint256 _percentageDefaulted) external;
 
     function resetAfterDefault(uint256 _newMaturityDate) external;
 
