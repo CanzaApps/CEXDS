@@ -36,8 +36,6 @@ contract CXDefaultSwap {
     //Premium price in bps
     uint256 public immutable premium;
     uint256 public immutable makerFee;
-    uint256 public immutable maxSellerCount;
-    uint256 public immutable maxBuyerCount;
     uint256 public constant basisPoints = 10000;
 
     //Pause boolean (for after default event)
@@ -125,8 +123,6 @@ contract CXDefaultSwap {
     /// @param _premium the premium percentage to be paid on every collateral purchase marked up by 10**4
     /// @param _makerFee the percentage to be paid on every purchase to amount to the treasury and voter reserve, marked up by 10**4
     /// @param _epochDays number of days with which to update the maturity timestamp after a maturation cycle has elapsed
-    /// @param _maxSellerCount Maximum number of sellers allowed
-    /// @param _maxBuyerCount Maximum number of collateral buyers allowed
     /// @param _votingContract address at where the contract implementing Voting consensus is deployed
     /// @param _oracle address at where the contract providing oracle data is deployed
     /// @param _isVoterDefaulting determines if the pool can be defaulted via a voter consensus or by the admin
@@ -137,8 +133,6 @@ contract CXDefaultSwap {
         uint256 _premium,
         uint256 _makerFee,
         uint256 _epochDays,
-        uint256 _maxSellerCount,
-        uint256 _maxBuyerCount,
         address _votingContract,
         address _oracle,
         bool _isVoterDefaulting
@@ -153,12 +147,11 @@ contract CXDefaultSwap {
         makerFee = _makerFee;
         maturityDate = block.timestamp + (_epochDays * 86400);
         epochDays = _epochDays;
-        maxSellerCount = _maxSellerCount;
-        maxBuyerCount = _maxBuyerCount;
         votingContract = _votingContract;
         oracleContract = _oracle;
         controller = msg.sender;
         isVoterDefaulting = _isVoterDefaulting;
+        epoch++;
     }
 
     modifier validCaller {
@@ -243,6 +236,7 @@ contract CXDefaultSwap {
         //Don't allow deposits during Pause after default event
         require(!paused,"Contract Paused");
         require(!closed,"Pool closed");
+        uint256 intendedPurchase = _amount;
         (uint256 totalPayable, uint256 premiumPaid, uint256 makerFeePaid, uint256 defaultCoverage) = getCostOfPurchase(_amount);
 
         uint256 actualTransferAmount = _transferFrom(totalPayable);
@@ -269,7 +263,7 @@ contract CXDefaultSwap {
 
         buyers[msg.sender].premiumPaid[epoch] += premiumPaid;
         buyers[msg.sender].collateralCovered[epoch] += _amount;
-        emit PurchaseCollateral(msg.sender, _amount, _amount, premiumPaid, makerFeePaid);
+        emit PurchaseCollateral(msg.sender, intendedPurchase, _amount, premiumPaid, makerFeePaid);
     }
 
     /// @notice Allows existing seller to withdraw collateral available to them. Locked collateral can not be withdrawn.
