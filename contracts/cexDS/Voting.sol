@@ -291,7 +291,7 @@ contract Voting is AccessControl {
         CXDefaultSwap(_poolAddress).deductFromVoterReserve(amountToPay);
 
         if (payout) {
-            ICreditDefaultSwap(_poolAddress).setDefaulted();
+            ICreditDefaultSwap(_poolAddress).setDefaulted(10000);
         } else {
             ICreditDefaultSwap(_poolAddress).unpause();
             emit ClearVotingData(_poolAddress, poolVotes[_poolAddress], false);

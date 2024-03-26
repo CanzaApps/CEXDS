@@ -16,9 +16,6 @@ contract SwapController is AccessControl {
     address public votingContract;
     address public oracleContract;
 
-    uint256 public maxNumberOfSellersPerPool;
-    uint256 public maxNumberOfBuyersPerPool;
-
     event SetOracleContract(address _oracleContract);
     event SetVotingContract(address _votingContract);
     event SwapContractCreated(address indexed _poolAddress
@@ -30,21 +27,18 @@ contract SwapController is AccessControl {
     , address poolOwner);
     event PoolPaused(address indexed _poolAddress, address _sender);
     event PoolUnpaused(address indexed _poolAddress, address _sender);
+    event PoolDefaulted(address indexed _poolAddress, uint256 _percentageDefaulted, address _sender);
     event PoolReset(address indexed _poolAddress, address _sender, uint256 _newMaturityDate);
     event PoolClosed(address indexed _poolAddress);
     event RollPoolEpoch(address indexed _poolAddress, address _sender);
 
     constructor(
         address secondSuperAdmin
-        , uint256 _maxNumberOfSellersPerPool
-        , uint256 _maxNumberOfBuyersPerPool
     ) {
         if (secondSuperAdmin == address(0)) revert("Attempting to set zero address as admin");
         _setupRole(SUPER_ADMIN, msg.sender);
         _setupRole(SUPER_ADMIN, secondSuperAdmin);
         _setRoleAdmin(ADMIN_CONTROLLER, SUPER_ADMIN);
-        maxNumberOfBuyersPerPool = _maxNumberOfBuyersPerPool;
-        maxNumberOfSellersPerPool = _maxNumberOfSellersPerPool;
     }
 
     modifier isAdmin() {
@@ -105,7 +99,7 @@ contract SwapController is AccessControl {
         bytes32 ownerRole = getPoolOwnerRole(poolAddress);
         _setRoleAdmin(ownerRole, SUPER_ADMIN);
         _grantRole(ownerRole, _owner);
-        Voting(votingContract).setVotersForPool(_voters, poolAddress);
+        if (withVoterConsensus) Voting(votingContract).setVotersForPool(_voters, poolAddress);
         emit SwapContractCreated(poolAddress, _currency, _premium, _epochDays, withVoterConsensus, false, msg.sender);
     }
 
@@ -125,6 +119,17 @@ contract SwapController is AccessControl {
     function setPoolUnpaused(address _add) external onlyRole(SUPER_ADMIN) {
         ICreditDefaultSwap(_add).unpause();
         emit PoolUnpaused(_add, msg.sender);
+    }
+
+    /**
+     * @notice implements a default action on a Swap pool. 
+     * Only exists for pools that do not require voter consensus for a default
+     * Would revert if the pool requires voter consensus. See {CXDefaultSwap.setDefaulted}
+     * @param _add the swap pool address
+     */
+    function setPoolDefaulted(address _add, uint256 _percentageDefaulted) external onlyRole(SUPER_ADMIN) {
+        ICreditDefaultSwap(_add).setDefaulted(_percentageDefaulted);
+        emit PoolDefaulted(_add, _percentageDefaulted, msg.sender);
     }
     
     /**
@@ -196,8 +201,6 @@ contract SwapController is AccessControl {
             _premium,
             _makerFee,
             _epochDays,
-            maxNumberOfSellersPerPool,
-            maxNumberOfBuyersPerPool,
             votingContract,
             oracleContract,
             withVoterConsensus

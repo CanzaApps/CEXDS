@@ -46,7 +46,17 @@ After updating configs, run the following
 
 ```shell
 export PRIVATE_KEY=[<WALLET_PRIVATE_KEY>]
-npx hardhat run scripts/deploy.js --network [<TESTNET_NAME>]
+
+npx hardhat compile
+npx hardhat deployment --reuse [true|false] --startat [swaps|controller|oracle|voting] --redeployallswaps [true|false] --network [<NETWORK_NAME>]
 ```
 
-Deployment outputs can be found in deployments/[<NETWORK>].json
+Deployment outputs can be found in `deployments/[<NETWORK_NAME>].json`
+
+## Deployment Arguments
+
+Parameter     | Optional | Description
+--------------|----------------|----------------
+`--reuse`| No | A `true` value informs the deployer to look into the deployment output file and use some of the existing deployment addresses for some of the contracts, and not redeploy them.
+`--startat` | Yes | Informs the deployer from which contract to start new deployment. It is only essential when `reuse` is `true`. If otherwise, this argument is ignored. Hierarchy of contracts dependency have to be considered here. `controller >> oracle >> voting >> swaps`
+`--redeployallswaps`| Yes | Informs the deployer whether to redeploy the previous existing swaps contracts in the deployment outputs file. If `true`, it only deploys the newly added swap configurations in `deploy-configs`
