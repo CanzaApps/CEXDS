@@ -10,7 +10,6 @@ cache
 artifacts
 
 
-scripts/tasks.js
 scripts/test.js
 
 deploy-configs/*/*
