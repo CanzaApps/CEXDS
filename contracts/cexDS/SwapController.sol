@@ -2,13 +2,13 @@
 pragma solidity 0.8.18;
 
 import "./CXDefaultSwap.sol";
-import "@openzeppelin/contracts/access/AccessControl.sol";
+import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import "./interfaces/ICreditDefaultSwap.sol";
-import "@openzeppelin/contracts/utils/Address.sol";
+import "@openzeppelin/contracts-upgradeable/utils/AddressUpgradeable.sol";
 import "./Voting.sol";
 
-contract SwapController is AccessControl {
-    using Address for address;
+contract SwapController is AccessControlUpgradeable {
+    using AddressUpgradeable for address;
     bytes32 public constant SUPER_ADMIN = 'SUPER_ADMIN';
     bytes32 public constant ADMIN_CONTROLLER = 'ADMIN_CONTROLLER';
 
@@ -33,15 +33,6 @@ contract SwapController is AccessControl {
     event RollPoolEpoch(address indexed _poolAddress, address _sender);
     event WithdrawPoolTokens(address indexed _poolAddress, uint256 _amount, address _recipient, address _sender);
 
-    constructor(
-        address secondSuperAdmin
-    ) {
-        if (secondSuperAdmin == address(0)) revert("Attempting to set zero address as admin");
-        _setupRole(SUPER_ADMIN, msg.sender);
-        _setupRole(SUPER_ADMIN, secondSuperAdmin);
-        _setRoleAdmin(ADMIN_CONTROLLER, SUPER_ADMIN);
-    }
-
     modifier isAdmin() {
         if(!hasRole(ADMIN_CONTROLLER, msg.sender) && !hasRole(SUPER_ADMIN, msg.sender)) revert("Caller does not have any of the admin roles");
         _;
@@ -50,6 +41,14 @@ contract SwapController is AccessControl {
     modifier isSuperAdminOrPoolOwner(address _pool) {
         if(!hasRole(getPoolOwnerRole(_pool), msg.sender) && !hasRole(SUPER_ADMIN, msg.sender)) revert("Unauthorized");
         _;
+    }
+
+    function initialize(address secondSuperAdmin) public onlyInitializing {
+        if (secondSuperAdmin == address(0)) revert("Attempting to set zero address as admin");
+        __AccessControl_init();
+        _setupRole(SUPER_ADMIN, msg.sender);
+        _setupRole(SUPER_ADMIN, secondSuperAdmin);
+        _setRoleAdmin(ADMIN_CONTROLLER, SUPER_ADMIN);
     }
 
     /**
@@ -255,7 +254,7 @@ contract SwapController is AccessControl {
     function getPoolOwnerRole(address _poolAddress) public pure returns (bytes32 ownerRole) {
         ownerRole = bytes32(abi.encodePacked(
             "Pool ",
-            Strings.toHexString(uint160(_poolAddress), 20),
+            StringsUpgradeable.toHexString(uint160(_poolAddress), 20),
             " Owner Role"
         ));
     }

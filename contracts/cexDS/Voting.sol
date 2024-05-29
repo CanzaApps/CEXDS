@@ -5,8 +5,8 @@ import "./CXDefaultSwap.sol";
 import "./SwapController.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/access/AccessControl.sol";
-import "@openzeppelin/contracts/utils/Address.sol";
+import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
+import "@openzeppelin/contracts-upgradeable/utils/AddressUpgradeable.sol";
 import "./interfaces/ICreditDefaultSwap.sol";
 import "./interfaces/ISwapController.sol";
 import "./interfaces/IOracle.sol";
@@ -16,8 +16,8 @@ import "./interfaces/IOracle.sol";
 *
 * @author Ebube
 */
-contract Voting is AccessControl {
-    using Address for address;
+contract Voting is AccessControlUpgradeable {
+    using AddressUpgradeable for address;
     using SafeERC20 for IERC20;
     bytes32 public constant SUPER_ADMIN = 'SUPER_ADMIN';
     bytes32 public constant VOTER_ROLE = 'VOTER_ROLE';
@@ -57,16 +57,19 @@ contract Voting is AccessControl {
     event SetController(address _controllerAddress);
     event SetOracle(address _oracleAddress);
 
-    constructor(
+    function initialize(
         address secondSuperAdmin,
         address controllerAddress,
         address oracle
-    ) {
+    ) public onlyInitializing {
+        if (secondSuperAdmin == address(0)) revert("Attempting to set zero address as admin");
+        if (controllerAddress == address(0) || oracle == address(0)) revert("Invalid addresses passed as contracts");
+        controller = controllerAddress;
+        oracleAddress = oracle;
+        __AccessControl_init();
         _setupRole(SUPER_ADMIN, msg.sender);
         _setupRole(SUPER_ADMIN, secondSuperAdmin);
         _setRoleAdmin(VOTER_ROLE, SUPER_ADMIN);
-        controller = controllerAddress;
-        oracleAddress = oracle;
     }
 
     /**
@@ -304,7 +307,7 @@ contract Voting is AccessControl {
             if (voterInfo.choice == payout) {
                 // Pay only to voters who are in the rational majority
                 
-                voterPerPoolAccumulatedRewards[voterInfo.voter][_poolAddress] += amountToPay/Math.max(votersForTrue, voterCount - votersForTrue);
+                voterPerPoolAccumulatedRewards[voterInfo.voter][_poolAddress] += amountToPay/MathUpgradeable.max(votersForTrue, voterCount - votersForTrue);
             }
 
             if (!payout) delete voterHasVoted[_poolAddress][votesForPool[i].voter];
@@ -331,9 +334,9 @@ contract Voting is AccessControl {
             revert(string(
                     abi.encodePacked(
                         "Address ",
-                        Strings.toHexString(voter),
+                        StringsUpgradeable.toHexString(voter),
                         " already has voting privileges for pool ",
-                        Strings.toHexString(_pool)
+                        StringsUpgradeable.toHexString(_pool)
                     )
                 ));
             _addVoter(voter, _pool);
