@@ -4,7 +4,7 @@ pragma solidity 0.8.18;
 interface ICreditDefaultSwap {
     function setDefaulted(uint256 _percentageDefaulted) external;
 
-    function resetAfterDefault(uint256 _newMaturityDate) external;
+    function resetAfterDefault() external;
 
     function withdrawFromBalance(uint256 _amount, address _recipient) external;
 

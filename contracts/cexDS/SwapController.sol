@@ -28,9 +28,10 @@ contract SwapController is AccessControl {
     event PoolPaused(address indexed _poolAddress, address _sender);
     event PoolUnpaused(address indexed _poolAddress, address _sender);
     event PoolDefaulted(address indexed _poolAddress, uint256 _percentageDefaulted, address _sender);
-    event PoolReset(address indexed _poolAddress, address _sender, uint256 _newMaturityDate);
+    event PoolReset(address indexed _poolAddress, address _sender);
     event PoolClosed(address indexed _poolAddress);
     event RollPoolEpoch(address indexed _poolAddress, address _sender);
+    event WithdrawPoolTokens(address indexed _poolAddress, uint256 _amount, address _recipient, address _sender);
 
     constructor(
         address secondSuperAdmin
@@ -52,12 +53,7 @@ contract SwapController is AccessControl {
     }
 
     /**
-     * @notice Initializes a Swap Contract for a specific ERC20 token on a specified entity.
-     * @param _entityName Human readable name for the entity
-     * @param _entityUrl URL for the specific entity
-     * @param _currency Token address, for which loan was taken in the specified entity. Token must implement the ERC-20 standard.
-     * @param _premium Premium percentage desired for credit swap pool.
-     * @param _epochDays Number of days for increment of the maturity date after every cycle without a default
+     * @notice See {_createSwapContract}
      */
     function createSwapContract(
         string memory _entityName,
@@ -80,6 +76,7 @@ contract SwapController is AccessControl {
      * @param _currency Token address, for which loan was taken in the specified entity. Token must implement the ERC-20 standard.
      * @param _premium Premium percentage desired for credit swap pool.
      * @param _epochDays Number of days for increment of the maturity date after every cycle without a default
+     * @param withVoterConsensus defines if a pool will be defaulted via voter consensus action
      * @param _owner the address of the owner of the 3rd party pool
      * @param _voters array of intended voter addresses
      */
@@ -135,12 +132,11 @@ contract SwapController is AccessControl {
     /**
      * @notice sets a swap pool state to be unpaused. Unlike {setPoolPaused}, this is restricted to only the superAdmin
      * @param _add the swap pool address
-     * @param _newMaturityDate the intended next maturity date of the pool in the next cycle
      */
-    function resetPoolAfterDefault(address _add, uint256 _newMaturityDate) external isSuperAdminOrPoolOwner(_add) {
-        ICreditDefaultSwap(_add).resetAfterDefault(_newMaturityDate);
+    function resetPoolAfterDefault(address _add) external isSuperAdminOrPoolOwner(_add) {
+        ICreditDefaultSwap(_add).resetAfterDefault();
         Voting(votingContract).clearVotingData(_add);
-        emit PoolReset(_add, msg.sender, _newMaturityDate);
+        emit PoolReset(_add, msg.sender);
     }
 
     /**
@@ -161,6 +157,10 @@ contract SwapController is AccessControl {
         emit RollPoolEpoch(_add, msg.sender);
     }
 
+    /**
+     * @notice sets the address of the voting contract in the event that it is changed.
+     * @param _address the new address for the oracle contract
+     */
     function setVotingContract(address _address) external onlyRole(SUPER_ADMIN) {
         if (!_address.isContract()) revert("Attempting to set invalid address. Check that it is not zero address, and that it is for a contract");
         if (_address == votingContract) revert("Already set");
@@ -169,6 +169,10 @@ contract SwapController is AccessControl {
         emit SetVotingContract(_address);
     }
 
+    /**
+     * @notice sets the address of the oracle contract in the event that it is changed.
+     * @param _address the new address for the oracle contract
+     */
     function setOracleContract(address _address) external onlyRole(SUPER_ADMIN) {
         if (!_address.isContract()) revert("Attempting to set invalid address. Check that it is not zero address, and that it is for a contract");
         if (_address == oracleContract) revert("Already set");
@@ -177,10 +181,26 @@ contract SwapController is AccessControl {
         emit SetOracleContract(_address);
     }
 
+    /**
+     * @notice withdraw trasury tokens on existing pools accumulated via maker fees paid at purchases.
+     * @param _poolAddress address of pool from which to withdraw
+     * @param _amount amount of tokens to withdraw
+     * @param _recipient address of withdrawal recipient
+     */
     function withdrawTokensFromPool(address _poolAddress, uint256 _amount, address _recipient) external onlyRole(SUPER_ADMIN) {
         ICreditDefaultSwap(_poolAddress).withdrawFromBalance(_amount, _recipient);
+        emit WithdrawPoolTokens(_poolAddress, _amount, _recipient, msg.sender);
     }
 
+    /**
+     * @notice Initializes a Swap Contract for a specific ERC20 token on a specified entity.
+     * @param _entityName Human readable name for the entity
+     * @param _entityUrl URL for the specific entity
+     * @param _currency Token address, for which loan was taken in the specified entity. Token must implement the ERC-20 standard.
+     * @param _premium Premium percentage desired for credit swap pool.
+     * @param _epochDays Number of days for increment of the maturity date after every cycle without a default
+     * @param withVoterConsensus defines if a pool will be defaulted via voter consensus action
+     */
     function _createSwapContract(
         string memory _entityName,
         string memory _entityUrl,
@@ -212,14 +232,26 @@ contract SwapController is AccessControl {
         swapList.push(contractAddress);
     }
 
+    /**
+     * @notice returns the list of all CXDefaultSwap pools already created
+     */
     function getSwapList() external view returns (address[] memory) {
         return swapList;
     }
 
+    /**
+     * @notice checks if a specific address owns a third-party pool
+     * @param pool address of the swap pool of interest
+     * @param add address for which to check if is owner of pool
+     */
     function isPoolOwner(address pool, address add) external view returns (bool) {
         return hasRole(getPoolOwnerRole(pool), add);
     }
 
+    /**
+     * @notice returns the bytes32 encoded role for the pool owner of a thirdparty pool
+     * @param _poolAddress 3rd party pool address
+     */
     function getPoolOwnerRole(address _poolAddress) public pure returns (bytes32 ownerRole) {
         ownerRole = bytes32(abi.encodePacked(
             "Pool ",

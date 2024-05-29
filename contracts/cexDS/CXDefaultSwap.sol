@@ -39,7 +39,7 @@ contract CXDefaultSwap {
     uint256 public constant basisPoints = 10000;
 
     //Pause boolean (for after default event)
-    bool private paused;
+    bool public paused;
     bool public closed;
     bool public defaulted;
     bool public isVoterDefaulting;
@@ -371,11 +371,13 @@ contract CXDefaultSwap {
     function setDefaulted(uint256 percentageDefaulted) external {
         require((isVoterDefaulting && msg.sender == votingContract) || (!isVoterDefaulting && msg.sender == controller),
         "Unauthorized");
-        _execute();
+        if(!paused) _execute();
+        // Update percentage default to account for previous existing default within epoch
+        percentageDefaulted = (basisPoints - percentageClaimable[epoch])*percentageDefaulted/basisPoints;
         uint256 amountClaimable = collateralCoveredTotal * percentageDefaulted / basisPoints;
-        
-        claimableCollateralTotal[epoch] = amountClaimable;
-        percentageClaimable[epoch] = percentageDefaulted;
+
+        claimableCollateralTotal[epoch] += amountClaimable;
+        percentageClaimable[epoch] += percentageDefaulted;
         depositedCollateralTotal -= amountClaimable;
         collateralCoveredTotal -= amountClaimable;
 
@@ -417,23 +419,23 @@ contract CXDefaultSwap {
     function closePool() external validCaller {
         require(msg.sender == controller, "Unauthorized");
         closed = true;
-        _execute();
+        maturityDate = block.timestamp + (epochDays * 86400);
+        epoch++;
+        collateralCoveredTotal = 0;
+        availableCollateralTotal = depositedCollateralTotal;
+        globalShareLock[epoch] = globalShareDeposit;
         emit ClosePool(msg.sender);
     }
 
+    /// @notice Updates contract state at instance of any call dependent on guaranteed storage state. 
+    /// Helps to ensure epoch is rolled before epoch-dependent activities are initiated.
+    /// Also validates that pool is not paused or closed when making deposit or purchase calls.
     function _execute() internal virtual {
         require(!paused, "Contract is paused");
         require(!closed, "Contract is closed");
         bool matured = block.timestamp > maturityDate;
 
-        if (closed) {
-            maturityDate = block.timestamp + (epochDays * 86400);
-            epoch++;
-            collateralCoveredTotal = 0;
-            availableCollateralTotal = depositedCollateralTotal;
-            globalShareLock[epoch] = globalShareDeposit;
-            
-        } else if (matured || defaulted) {
+        if (matured || defaulted) {
             maturityDate = (defaulted ? block.timestamp : maturityDate) + (epochDays * 86400);
             epoch ++;
             collateralCoveredTotal = 0;
@@ -445,6 +447,8 @@ contract CXDefaultSwap {
         }
     }
 
+    /// @notice Implements logic for transferring tokens from any address to the smart contract, and accounts for existence of fees on the ERC20 token
+    /// @dev Must be called over direct safeTransferFrom to ensure valid amounts on deposits and purchases are accounted for
     function _transferFrom(uint256 _amount) internal returns (uint256 actualTransferAmount) {
         uint256 previousBalanceOfContract = currency.balanceOf(address(this));
 
@@ -458,6 +462,8 @@ contract CXDefaultSwap {
         actualTransferAmount = finalBalanceOfContract - previousBalanceOfContract;
     }
 
+    /// @notice Implements logic for transferring tokens to any address from the smart contract, and accounts for existence of fees on the ERC20 token
+    /// @dev Must be called over direct safeTransferFrom to ensure valid amounts on deposits and purchases are accounted for
     function _transferTo(uint256 _amount, address _user) internal returns (uint256 actualTransferAmount) {
         uint256 previousBalanceOfReceiver = currency.balanceOf(_user);
         currency.safeTransfer(_user, _amount);
@@ -465,14 +471,21 @@ contract CXDefaultSwap {
         uint256 finalBalanceOfReceiver = currency.balanceOf(_user);
         actualTransferAmount = finalBalanceOfReceiver - previousBalanceOfReceiver;
     }
-
  
     //Functions to calculate all relevant variables without loops
+
+    /// @notice Calculates the total deposited collateral for a particular seller
+    /// @param _address address of the seller
+    /// @return userCollateral the deposited collateral for the seller
     function calculateDespositedCollateralUser(address _address) public view returns (uint256 userCollateral){
         if (globalShareDeposit == 0) return userCollateral;
         userCollateral = depositedCollateralTotal * sellers[_address].userShareDeposit / globalShareDeposit;
     }
 
+
+    /// @notice Calculates the total available collateral for a particular seller
+    /// @param _address address of the seller
+    /// @return availableCollateralUser the seller available collateral
     function calculateAvailableCollateralUser(address _address) public view returns (uint256 availableCollateralUser){
         if (globalShareLock[epoch] == 0) return availableCollateralUser;
         if(sellers[_address].interactedThisEpoch[epoch]){
@@ -485,25 +498,41 @@ contract CXDefaultSwap {
         }
     }
 
+    /// @notice Returnss the total locked collateral for a particular seller
+    /// @param _address address of the seller
+    /// @return lockedCollateralUser the seller locked collateral
     function calculateLockedCollateralUser(address _address) public view returns (uint256 lockedCollateralUser){
         lockedCollateralUser = calculateDespositedCollateralUser(_address) - calculateAvailableCollateralUser(_address) ;
     }
 
+    /// @notice Checks if seller has interacted in the current epoch
+    /// @param _address address of the seller
+    /// @return interacted boolean check
     function getInteractedThisEpoch(address _address) public view returns (bool interacted){
         interacted = sellers[_address].interactedThisEpoch[epoch];
     }
 
+    /// @notice Returns the total collateral claimable by buyer
+    /// @param _buyer address of the buyer
+    /// @return claimableAmount amount claimable by the buyer
     function getBuyerClaimableCollateral(address _buyer) public view returns (
-        uint256 transferAmount
+        uint256 claimableAmount
     ) {
 
         for (uint256 i = buyerLastCollateralClaimEpoch[_buyer]; i <= epoch; i++)  {
             if (claimableCollateralTotal[i] == 0) continue;
             uint256 x = buyers[_buyer].collateralCovered[i]*percentageClaimable[i]/basisPoints;
-            transferAmount += x;
+            claimableAmount += x;
         }
     }
 
+    /// @notice Provides the total value to be paid by a buyer in the event of existing default on an epoch
+    /// @dev Considers the existing default percentage in the {existingDefaultCoverage} to get the total that must be paid by intending buyer
+    /// @param _amountToPurchase Amount of collateral to be purchased by intending buyer
+    /// @return totalPayable Total Amount to be paid by buyer to purchase {_amountToPurchase}. Comprises of premium, maker fee and default coverage
+    /// @return premiumPayable Premium amount to be paid by buyer 
+    /// @return makerFeePayable Treasury fee to be paid by buyer
+    /// @return existingDefaultCoverage Amount to be paid by buyer to cover for existing default coverage on the epoch
     function getCostOfPurchase(uint256 _amountToPurchase) public view returns (
         uint256 totalPayable,
         uint256 premiumPayable,
@@ -516,6 +545,13 @@ contract CXDefaultSwap {
         totalPayable = makerFeePayable + premiumPayable + existingDefaultCoverage;
     }
 
+
+    /// @dev Provides logic for determining the exact values for collateral purchased after token transfer accounting for fees deducted on transfer
+    /// @param totalAmountPaid Total amount received after transfer of payment from the buyer
+    /// @return actualCollateralToPurchase Actual collateral amount proportional to amount received from the buyer
+    /// @return actualPremiumPaid Actual premium amount received the buyer proportional to the total amount received from the buyer 
+    /// @return actualMakerFeePaid Actual treasury fee amount received the buyer proportional to the total amount received from the buyer
+    /// @return actualDefaultCoverage Actual amount received from buyer to cover for existing default coverage on the epoch
     function doBackPropagation(uint256 totalAmountPaid) internal view returns (
         uint256 actualCollateralToPurchase,
         uint256 actualPremiumPaid,

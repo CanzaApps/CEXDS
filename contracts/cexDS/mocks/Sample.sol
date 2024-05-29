@@ -7,12 +7,19 @@ contract Sample {
 
     bool public initialized;
     uint256 deposits;
+    uint8 public constant epochDays = 7;
+    uint256 public totalVoterFeeRemaining;
 
     constructor() {
         initialized = true;
+        totalVoterFeeRemaining += 10000 * 1e18;
     }
 
     function deposit() external payable {
         deposits += msg.value;
+    }
+
+    function deductFromVoterReserve(uint256 _amount) external {
+        totalVoterFeeRemaining -= _amount;
     }
 }

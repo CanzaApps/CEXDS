@@ -106,16 +106,11 @@ contract("CXDefaultSwap", async () => {
                 const maturityDate = (await swapContract.maturityDate()).toString()
                 const epochDays = (await swapContract.epochDays()).toString()
                 const premium = (await swapContract.premium()).toString()
-                const maxBuyerCount = (await swapContract.maxBuyerCount()).toString()
-                const maxSellerCount = (await swapContract.maxSellerCount()).toString()
-                console.log(maturityDate)
 
                 assert(entity == ENTITY_NAME, "Entity Name Mismatch")
                 assert(token == poolToken.address, "Pool Currency Mismatch")
                 assert(epochDays == INIT_EPOCH.toString(), "Epoch Days Mismatch")
                 assert(premium == (PREMIUM * 10000).toString(), "Premium Value Mismatch")
-                assert(maxBuyerCount == MAX_BUYER_COUNT.toString(), "Buyer Count Mismatch")
-                assert(maxSellerCount == MAX_SELLER_COUNT.toString(), "Seller Count Mismatch")
 
                 expect(entity).to.equal(ENTITY_NAME);
             })
@@ -152,7 +147,6 @@ contract("CXDefaultSwap", async () => {
                     poolToken.address,
                     (PREMIUM * 10000).toString(),
                     (testMakerFee * 10000).toString(),
-                    maturityTime.toString(),
                     (INIT_EPOCH).toString(),
                     voting.address, 
                     oracle.address,
@@ -250,8 +244,8 @@ contract("CXDefaultSwap", async () => {
             it("Should update the seller mappings on deposit", async () => {
                 const finalSellerData = await swapContract.sellers(acc0.address);
                 const finalPoolUserData = (await swapContract.getPoolData(acc0.address)).userData;
-                
-                expect(+finalSellerData.userShareDeposit.toString() - (+previousSellerData.userShareDeposit.toString())).to.equal(+amtInWei.toString());
+                console.log({finalSellerData})
+                expect(+finalSellerData.toString() - (+previousSellerData.toString())).to.equal(+amtInWei.toString());
                 expect(+finalPoolUserData.depositedCollateral.toString() - (+previousPoolUserData.depositedCollateral.toString())).to.equal(+amtInWei.toString());
                 expect(+finalPoolUserData.availableCollateral.toString() - (+previousPoolUserData.availableCollateral.toString())).to.equal(+amtInWei.toString());
             })
@@ -302,7 +296,7 @@ contract("CXDefaultSwap", async () => {
                 const finalGlobalShareDeposit = await swapContract.globalShareDeposit();
                 const finalGlobalShareLock = await swapContract.globalShareLock(epoch);
                 
-                expect(+finalSellerData.userShareDeposit.toString() - (+previousSellerData.userShareDeposit.toString())).to.equal(+amtInWei.toString());
+                expect(+finalSellerData.toString() - (+previousSellerData.toString())).to.equal(+amtInWei.toString());
                 expect(+finalPoolUserData.depositedCollateral.toString() - (+previousPoolUserData.depositedCollateral.toString())).to.equal(+amtInWei.toString());
                 expect(+finalPoolUserData.availableCollateral.toString() - (+previousPoolUserData.availableCollateral.toString())).to.equal(+amtInWei.toString());
                 expect(+finalGlobalShareDeposit.toString() - (+previousGlobalShareDeposit.toString())).to.equal(+ethers.utils.parseEther(expectedDepositShareChange.toString()).toString());
@@ -378,7 +372,7 @@ contract("CXDefaultSwap", async () => {
                 const finalSellerData = await swapContract.sellers(acc0.address);
                 const finalPoolUserData = (await swapContract.getPoolData(acc0.address)).userData;
                 
-                expect(+finalSellerData.userShareDeposit.toString() - (+previousSellerData.userShareDeposit.toString())).to.equal(-amtInWei.toString());
+                expect(+finalSellerData.toString() - (+previousSellerData.toString())).to.equal(-amtInWei.toString());
                 expect(+finalPoolUserData.depositedCollateral.toString() - (+previousPoolUserData.depositedCollateral.toString())).to.equal(-amtInWei.toString());
                 expect(+finalPoolUserData.availableCollateral.toString() - (+previousPoolUserData.availableCollateral.toString())).to.equal(-amtInWei.toString());
 
@@ -387,13 +381,13 @@ contract("CXDefaultSwap", async () => {
             it("Should update the global total deposit collateral data", async () => {
                 const finalAvailableCollateral = await swapContract.availableCollateralTotal();
                 const finalDepositedCollateral = await swapContract.depositedCollateralTotal();
-                const finalUserShareDeposit = (await swapContract.sellers(acc0.address)).userShareDeposit;
+                const finalUserShareDeposit = (await swapContract.sellers(acc0.address));
 
-                const expectedDepositShareChange = Number(ethers.utils.formatEther(previousSellerData.userShareDeposit)) * withdrawAmount/Number(ethers.utils.formatEther(previousDepositedCollateral));
+                const expectedDepositShareChange = Number(ethers.utils.formatEther(previousSellerData)) * withdrawAmount/Number(ethers.utils.formatEther(previousDepositedCollateral));
 
                 expect(+finalAvailableCollateral.toString() - (+previousAvailableCollateral.toString())).to.equal(-amtInWei.toString());
                 expect(+finalDepositedCollateral.toString() - (+previousDepositedCollateral.toString())).to.equal(-amtInWei.toString());
-                expect(+finalUserShareDeposit.toString() - (+previousSellerData.userShareDeposit.toString())).to.equal(+ethers.utils.parseEther(-expectedDepositShareChange.toString()).toString());
+                expect(+previousSellerData.toString() - (+finalUserShareDeposit.toString())).to.equal(+ethers.utils.parseEther(expectedDepositShareChange.toString()).toString());
 
             })
 
@@ -412,14 +406,14 @@ contract("CXDefaultSwap", async () => {
         context("Edge cases", () => {
 
             it("Should not withdraw if amount exceeds seller's available collateral", async () => {
-                const finalSellerData = await swapContract.sellers(acc0.address);
+                const sellerAvailableCollateral = await swapContract.calculateAvailableCollateralUser(acc0.address)
 
-                const availableCollateral = ethers.utils.formatEther(finalSellerData.availableCollateral)
+                const availableCollateral = ethers.utils.formatEther(sellerAvailableCollateral)
                 const withdrawAmtInWei = ethers.utils.parseEther((+availableCollateral + 10).toString())
 
                 const depositTx = swapContract.withdraw(withdrawAmtInWei);
 
-                await expect(depositTx).to.be.revertedWith("Not enough unlocked collateral");
+                await expect(depositTx).to.be.revertedWith("Not enough available");
 
             })
         })
@@ -513,33 +507,88 @@ contract("CXDefaultSwap", async () => {
 
         context("Edge cases", () => {
 
-            it("Should not purchase if buyer count already exceeded Max Buyer Count", async () => {
-                const amtToBuy = (purchaseAmount/10)/MAX_BUYER_COUNT;
-                const amtToBuyInWei = ethers.utils.parseEther(amtToBuy.toString())
-
-                const accs = [acc5, acc6, acc7, acc8, acc9, acc10, acc11, acc12, acc13, acc14, acc15];
-
-                for (const acc of accs.slice(0, MAX_BUYER_COUNT - 1)) {
-                    await poolToken.mint(acc.address, amtToBuyInWei)
-                    await poolToken.connect(acc).approve(swapContract.address, amtToBuyInWei)
-
-                    await (await swapContract.connect(acc).purchase(amtToBuyInWei)).wait();
-
-                }
-
-                // Try to deposit on the next address
-                const nextAcc = accs[MAX_BUYER_COUNT - 1]
-                await poolToken.mint(nextAcc.address, amtToBuyInWei);
-                await poolToken.connect(nextAcc).approve(swapContract.address, amtToBuyInWei);
-
-                const purchaseTx = swapContract.connect(nextAcc).purchase(amtToBuyInWei);
-
-                await expect(purchaseTx).to.be.revertedWith("Already reached maximum allowable buyers");
-                await network.provider.send('evm_revert', [snapshotId]);
-                
-            })
+            
         })
     })
+
+
+    describe("withdrawFromBalance", function () {
+
+        let previousPoolBalance;
+        let previousRecipientBalance;
+        context("Happy path", function () {
+            before(async () => {
+                previousPoolBalance = await poolToken.balanceOf(swapContract.address);
+                previousRecipientBalance = await poolToken.balanceOf(acc4.address);
+            })
+
+            it("Should emit WithdrawFromBalance event", async () => {
+                const expectedWithdrawal = 0.25 * +previousPoolBalance.toString();
+                const tx = swapContract.withdrawFromBalance(expectedWithdrawal.toString(), acc4.address)
+
+                await expect(tx).to.emit(swapContract, "WithdrawFromBalance").withArgs(acc4.address, expectedWithdrawal.toString(), expectedWithdrawal.toString())
+            })
+
+            it("withdraw the specified amount from the pool balance and increase balance of recipient", async () => {
+                
+                finalPoolBalance = await poolToken.balanceOf(swapContract.address);
+                finalRecipientBalance = await poolToken.balanceOf(acc4.address);
+                expect(+finalRecipientBalance.toString()).to.equal(+previoulRecipientBalance.toString() + (expectedWithdrawal));
+                expect(+finalPoolBalance.toString()).to.equal(+previoulPoolBalance.toString() - (expectedWithdrawal));
+            })
+
+        })
+
+        context("Fail cases", function () {
+
+            it("should not be callable by an address that is not the controller contract", async () => {
+                const expectedWithdrawal = 0.25 * +previousPoolBalance.toString();
+                const tx = swapContract.connect(acc3).withdrawFromBalance(expectedWithdrawal.toString(), acc4.address);
+                await expect(rollTx).to.be.revertedWith("Unauthorized");
+            })
+
+        })
+    })
+
+
+    describe("withdrawFromBalance", function () {
+
+        let previousPoolBalance;
+        let previousRecipientBalance;
+        context("Happy path", function () {
+            before(async () => {
+                previousPoolBalance = await poolToken.balanceOf(swapContract.address);
+                previousRecipientBalance = await poolToken.balanceOf(acc4.address);
+            })
+
+            it("Should emit WithdrawFromBalance event", async () => {
+                const expectedWithdrawal = 0.25 * +previousPoolBalance.toString();
+                const tx = swapContract.withdrawFromBalance(expectedWithdrawal.toString(), acc4.address)
+
+                await expect(tx).to.emit(swapContract, "WithdrawFromBalance").withArgs(acc4.address, expectedWithdrawal.toString(), expectedWithdrawal.toString())
+            })
+
+            it("withdraw the specified amount from the pool balance and increase balance of recipient", async () => {
+                
+                finalPoolBalance = await poolToken.balanceOf(swapContract.address);
+                finalRecipientBalance = await poolToken.balanceOf(acc4.address);
+                expect(+finalRecipientBalance.toString()).to.equal(+previoulRecipientBalance.toString() + (expectedWithdrawal));
+                expect(+finalPoolBalance.toString()).to.equal(+previousPoolBalance.toString() - (expectedWithdrawal));
+            })
+
+        })
+
+        context("Fail cases", function () {
+
+            it("should not be callable by an address that is not the controller contract", async () => {
+                const expectedWithdrawal = 0.25 * +previousPoolBalance.toString();
+                const tx = swapContract.connect(acc3).withdrawFromBalance(expectedWithdrawal.toString(), acc4.address);
+                await expect(tx).to.be.revertedWith("Unauthorized");
+            })
+
+        })
+    })
+
 
     describe("setDefaulted", function () {
         let previousSellerData;
@@ -549,6 +598,9 @@ contract("CXDefaultSwap", async () => {
         let previousCollateralCovered;
         let previousClaimableCollateral;
         let previousPauseState;
+        let epoch;
+        let previousPercentageClaimable;
+        const defaultPercentage = 30;
 
         context("Happy path", function () {
 
@@ -567,12 +619,10 @@ contract("CXDefaultSwap", async () => {
                     poolToken.address,
                     (PREMIUM * 10000).toString(),
                     (MAKER_FEE * 10000).toString(),
-                    (INIT_MATURITY_DATE).toString(),
                     (INIT_EPOCH).toString(),
-                    MAX_SELLER_COUNT.toString(),
-                    MAX_BUYER_COUNT.toString(),
-                    sample1.address, // assumed voting Contract
-                    oracle.address
+                    voting.address, // assumed voting Contract
+                    oracle.address,
+                    false
                 )).deployed();
                 const depositAmount = 100;
                 const purchaseAmount = 50;
@@ -601,61 +651,94 @@ contract("CXDefaultSwap", async () => {
                 });
 
                 votingSigner = await ethers.getSigner(sample1.address);
+                epoch = await newSwapContract.epoch();
                 
                 previousSellerData = await newSwapContract.sellers(acc1.address);
                 previousBuyerData = await newSwapContract.buyers(acc3.address);
                 previousLockedCollateral = await newSwapContract.lockedCollateralTotal();
                 previousCollateralCovered = await newSwapContract.collateralCoveredTotal();
-                previousClaimableCollateral = await newSwapContract.claimableCollateralTotal();
-                previousPauseState = await newSwapContract.isPaused();
+                previousClaimableCollateral = await newSwapContract.claimableCollateralTotal(epoch);
+                previousPercentageClaimable = await newSwapContract.percentageClaimable(epoch);
+                previousPauseState = await newSwapContract.paused();
+                snapshotId = await network.provider.send('evm_snapshot');
             })
 
-            it("should update the pool state to defaulted", async () => {
+            it("should update the pool default percentage and amount claimable", async () => {
 
-                const tx = await newSwapContract.connect(votingSigner).setDefaulted();
-
+                const tx = await newSwapContract.connect(votingSigner).setDefaulted((defaultPercentage * 100).toString());
+                const expectedAmountClaimable = (+previousCollateralCovered.toString()) * (defaultPercentage / 100);
                 await tx.wait();
+                const finalClaimableCollateral = await newSwapContract.claimableCollateralTotal(epoch);
+                const finalPercentageClaimable = await newSwapContract.percentageClaimable(epoch);
+                expect(+finalClaimableCollateral.toString() - (+previousClaimableCollateral.toString())).to.equal(expectedAmountClaimable)
+                expect(+finalPercentageClaimable.toString() - (+previousPercentageClaimable.toString())).to.equal(defaultPercentage * 100);
+            })
 
+            it("should allow a second default if previous default exists", async () => {
+                previousClaimableCollateral = await newSwapContract.claimableCollateralTotal(epoch);
+                previousPercentageClaimable = await newSwapContract.percentageClaimable(epoch);
+                previousCollateralCovered = await newSwapContract.collateralCoveredTotal();
+
+                const tx = await newSwapContract.connect(votingSigner).setDefaulted((defaultPercentage * 100).toString());
+                await tx.wait();
+                const expectedAmountClaimable = (+previousCollateralCovered.toString()) * (defaultPercentage / 100);
+                const expectedDefaultPercentChange = (10000 - (+previousPercentageClaimable.toString())) * (defaultPercentage / 100);
+                const finalClaimableCollateral = await newSwapContract.claimableCollateralTotal(epoch);
+                const finalPercentageClaimable = await newSwapContract.percentageClaimable(epoch);
+                expect(+finalClaimableCollateral.toString() - (+previousClaimableCollateral.toString())).to.equal(expectedAmountClaimable)
+                expect(+finalPercentageClaimable.toString() - (+previousPercentageClaimable.toString())).to.equal(expectedDefaultPercentChange);
+                await network.provider.send('evm_revert', [snapshotId]);
+            })
+
+
+            it("should update the pool state to defaulted if the default percentage is 100%", async () => {
+
+                const tx = await newSwapContract.connect(votingSigner).setDefaulted('10000');
+                await tx.wait();
                 expect(await newSwapContract.defaulted()).to.be.true;
             })
 
-            it("Should set the pool state to paused", async () => {
+            it("Should set the pool state to paused if the default percentage is 100%", async () => {
 
-                const finalPauseState = await newSwapContract.isPaused();
+                const finalPauseState = await newSwapContract.paused();
                 expect(finalPauseState && previousPauseState).to.be.false;
                 expect(finalPauseState).to.be.true;
-            })
-
-            it("Should update all buyer and seller numbers", async () => {
-
-                const finalSellerData = await newSwapContract.sellers(acc1.address);
-                const finalBuyerData = await newSwapContract.buyers(acc3.address);
-                const finalLockedCollateral = await newSwapContract.lockedCollateralTotal();
-                const finalCollateralCovered = await newSwapContract.collateralCoveredTotal();
-                const finalClaimableCollateral = await newSwapContract.claimableCollateralTotal();
-                
-                expect(+previousSellerData.depositedCollateral.toString() - (+finalSellerData.depositedCollateral.toString())).to.equal(+previousSellerData.lockedCollateral.toString())
-                expect(+finalSellerData.lockedCollateral.toString()).to.equal(0)
-                expect(+previousBuyerData.claimableCollateral.toString() - (+finalBuyerData.claimableCollateral.toString())).to.equal(-previousBuyerData.collateralCovered.toString())
-                expect(+finalBuyerData.collateralCovered.toString()).to.equal(0)
-                expect(+finalLockedCollateral.toString()).to.equal(0)
-
-                expect(+previousClaimableCollateral.toString() - (+finalClaimableCollateral.toString())).to.equal(-previousCollateralCovered.toString())
-                expect(+finalCollateralCovered.toString()).to.equal(0)
-
             })
 
         })
 
         context("Fail cases", () => {
 
-            it("should only be callable from votingContract", async () => {
+            it("should only be callable from votingContract if isVoterDefaulting is true", async () => {
 
-                const defaultTx = newSwapContract.setDefaulted();
+                const defaultTx = newSwapContract.setDefaulted((defaultPercentage * 100).toString());
 
                 await expect(defaultTx).to.be.revertedWith("Unauthorized");
 
-                const defaultTx2 = newSwapContract.connect(acc0).setDefaulted();
+                const defaultTx2 = newSwapContract.connect(acc0).setDefaulted((defaultPercentage * 100).toString());
+
+                await expect(defaultTx2).to.be.revertedWith("Unauthorized");
+            })
+
+            it("should only be callable from deployer if isVoterDefaulting is false", async () => {
+                const newSwapContract2 = await (await (await ethers.getContractFactory("CXDefaultSwap")).connect(acc1).deploy(
+                    
+                    ENTITY_NAME,
+                    ENTITY_URL,
+                    poolToken.address,
+                    (PREMIUM * 10000).toString(),
+                    (MAKER_FEE * 10000).toString(),
+                    (INIT_EPOCH).toString(),
+                    voting.address, // assumed voting Contract
+                    oracle.address,
+                    false
+                )).deployed();
+
+                const defaultTx = newSwapContract2.setDefaulted((defaultPercentage * 100).toString());
+
+                await expect(defaultTx).to.be.revertedWith("Unauthorized");
+
+                const defaultTx2 = newSwapContract2.connect(votingSigner).setDefaulted((defaultPercentage * 100).toString());
 
                 await expect(defaultTx2).to.be.revertedWith("Unauthorized");
             })
@@ -664,14 +747,14 @@ contract("CXDefaultSwap", async () => {
 
 
     describe("claimCollateral", function () {
-        let previousBuyerData;
+        let previousBuyerClaimableCollateral;
         let previousClaimableCollateral;
         let previousBuyerTokenBalance;
 
         before(async () => {
 
             previousBuyerTokenBalance = await poolToken.balanceOf(acc3.address);
-            previousBuyerData = await newSwapContract.buyers(acc3.address);
+            previousBuyerClaimableCollateral = await newSwapContract.getBuyerClaimableCollateral(acc3.address);
             previousClaimableCollateral = await newSwapContract.claimableCollateralTotal();
             console.log({previousBuyerData})
         })
@@ -681,25 +764,25 @@ contract("CXDefaultSwap", async () => {
             it("should emit ClaimCollateral event", async () => {
 
                 const claimTx = newSwapContract.connect(acc3).claimCollateral();
-                const collateralClaimed = previousBuyerData.claimableCollateral;
+                const collateralClaimed = previousBuyerClaimableCollateral;
                 await expect(claimTx).to.emit(newSwapContract, "ClaimCollateral").withArgs(acc3.address, collateralClaimed, collateralClaimed);
             })
 
-            it("Should update the seller mappings and universal unclaimed premium", async () => {
+            it("Should transfer the collateral amount to the buyer", async () => {
 
-                const finalBuyerData = await newSwapContract.buyers(acc3.address);
-
-                const finalClaimableCollateral = await newSwapContract.claimableCollateralTotal();
-                expect(finalBuyerData.claimableCollateral.toString()).to.equal('0');
-                expect(+previousClaimableCollateral.toString() - (+finalClaimableCollateral.toString())).to.equal(+previousBuyerData.claimableCollateral.toString())
+                const finalBuyerTokenBalance = await poolToken.balanceOf(acc3.address);
+                expect(+finalBuyerTokenBalance.toString() - (+previousBuyerTokenBalance.toString())).to.equal(+previousBuyerClaimableCollateral.toString())
 
             })
 
-            it("Should transfer the premium amount to the seller", async () => {
+        })
 
-                const finalBuyerTokenBalance = await poolToken.balanceOf(acc3.address);
-                expect(+finalBuyerTokenBalance.toString() - (+previousBuyerTokenBalance.toString())).to.equal(+previousBuyerData.claimableCollateral.toString())
+        context("Fail cases", function () {
 
+            it("should revert if available claim amount is 0", async () => {
+
+                const claimTx = newSwapContract.connect(acc3).claimCollateral();
+                await expect(claimTx).to.be.revertedWith("No collateral available to claim");
             })
 
         })
@@ -710,7 +793,7 @@ contract("CXDefaultSwap", async () => {
 
         context("Happy path", function () {
 
-            it("should update pool defaulted state to false", async () => {
+            it("should update pool defaulted and paused states to false", async () => {
                 const newMaturityDate = Math.round(Date.now()/1000) + (86400 * 3);
                 const tx = await newSwapContract.connect(acc0).resetAfterDefault(newMaturityDate);
 
@@ -722,6 +805,52 @@ contract("CXDefaultSwap", async () => {
 
         })
 
+        context("Fail cases", function () {
+
+            it("should only be callable by the deployer", async () => {
+                const tx = newSwapContract.connect(acc3).resetAfterDefault(newMaturityDate);
+                await expect(tx).to.be.revertedWith("Unauthorized");
+            })
+
+        })
+
+    })
+
+
+    describe("deductFromVoterReserve", function () {
+
+        let previousVoterReserveBalance;
+        context("Happy path", function () {
+            before(async () => {
+                previousVoterReserveBalance = await newSwapContract.totalVoterFeeRemaining(swapContract.address);
+            })
+
+            it("Decrease voter reserve by expected amount", async () => {
+                const expectedWithdrawal = 0.25 * +previousVoterReserveBalance.toString();
+                const tx = await newSwapContract.connect(votingSigner).deductFromVoterReserve(expectedWithdrawal.toString());
+                await tx.wait();
+
+                finalVoterReserveBalance = await swapContract.totalVoterFeeRemaining(swapContract.address);
+                expect(+previousVoterReserveBalance.toString() - (+finalVoterReserveBalance.toString())).to.equal(expectedWithdrawal)
+            })
+
+        })
+
+        context("Fail cases", function () {
+
+            it("should revert if amount to deduct exceeds reserve balance", async () => {
+                const expectedWithdrawal = 1.25 * +previousPoolBalance.toString();
+                const tx = newSwapContract.connect(votingSigner).deductFromVoterReserve(expectedWithdrawal.toString());
+                await expect(tx).to.be.revertedWith("Not sufficient deductible");
+            })
+
+            it("should not be callable by an address that is not the voting contract", async () => {
+                const expectedWithdrawal = 0.25 * +previousPoolBalance.toString();
+                const tx = newSwapContract.connect(acc1).deductFromVoterReserve(expectedWithdrawal.toString());
+                await expect(tx).to.be.revertedWith("Unauthorized");
+            })
+
+        })
     })
 
     describe("rollEpoch", function () {
@@ -742,11 +871,8 @@ contract("CXDefaultSwap", async () => {
 
             it("should move the pool maturity date backward by as many seconds as in the epoch days", async () => {
                 const tx = await newSwapContract.connect(acc0).rollEpoch();
-
                 await tx.wait();
-
                 const finalMaturityDate = await newSwapContract.maturityDate();
-
                 expect(+finalMaturityDate.toString()).to.equal(+previousMaturityDate.toString() + (epochDays * 86400));
             })
 
@@ -755,9 +881,7 @@ contract("CXDefaultSwap", async () => {
         context("Fail cases", function () {
 
             it("should not be callable by an address that is not the controller contract", async () => {
-
                 const rollTx = newSwapContract.connect(votingSigner).rollEpoch();
-    
                 await expect(rollTx).to.be.revertedWith("Unauthorized");
             })
 
@@ -769,14 +893,14 @@ contract("CXDefaultSwap", async () => {
 
         context("Happy path", function () {
             before(async () => {
-                previousPauseState = await newSwapContract.isPaused();
+                previousPauseState = await newSwapContract.paused();
             })
 
             it("should set the pool state to paused", async () => {
                 const tx = await newSwapContract.connect(acc0).pause();
                 await tx.wait();
 
-                const finalPauseState = await newSwapContract.isPaused();
+                const finalPauseState = await newSwapContract.paused();
                 expect(finalPauseState && previousPauseState).to.be.false;
                 expect(finalPauseState).to.be.true;
             })
@@ -827,17 +951,13 @@ contract("CXDefaultSwap", async () => {
     })
 
     describe("closePool", function () {
-        let previousSellerData;
         let previousAvailableCollateral;
         let previousLockedCollateral;
-        let previousBuyerData;
         let previousCollateralCovered;
         let previousCloseState;
 
         context("Happy path", function () {
             before(async () => {
-                previousSellerData = await newSwapContract.sellers(acc1.address);
-                previousBuyerData = await newSwapContract.buyers(acc3.address);
                 previousAvailableCollateral = await newSwapContract.availableCollateralTotal();
                 previousLockedCollateral = await newSwapContract.lockedCollateralTotal();
                 previousCollateralCovered = await newSwapContract.collateralCoveredTotal();
@@ -854,15 +974,10 @@ contract("CXDefaultSwap", async () => {
             })
 
             it("should revert locked collaterals to available collaterals and update the states", async () => {
-                finalSellerData = await newSwapContract.sellers(acc1.address);
-                finalBuyerData = await newSwapContract.buyers(acc3.address);
                 finalAvailableCollateral = await newSwapContract.availableCollateralTotal();
                 finalLockedCollateral = await newSwapContract.lockedCollateralTotal();
                 finalCollateralCovered = await newSwapContract.collateralCoveredTotal();
 
-                expect(+previousSellerData.availableCollateral.toString() - (+finalSellerData.availableCollateral.toString())).to.equal(-previousSellerData.lockedCollateral.toString())
-                expect(+finalSellerData.lockedCollateral.toString()).to.equal(0)
-                expect(+finalBuyerData.collateralCovered.toString()).to.equal(0)
                 expect(+previousAvailableCollateral.toString() - (+finalAvailableCollateral.toString())).to.equal(-previousLockedCollateral.toString())
                 expect(+finalLockedCollateral.toString()).to.equal(0);
                 expect(+finalCollateralCovered.toString()).to.equal(0)

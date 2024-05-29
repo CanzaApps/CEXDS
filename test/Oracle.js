@@ -32,10 +32,8 @@ describe("RateOracle", function () {
 
 
     before(async () => {
-        [acc0, acc1, acc2, acc3, acc4, acc5] = await ethers.getSigners();
+        [acc0, acc1, acc2, acc3, acc4, acc5, acc6, acc7, acc8, acc9, acc10] = await ethers.getSigners();
         controller = await (await (await ethers.getContractFactory("SwapController")).deploy(acc1.address
-            , MAX_SELLER_COUNT.toString()
-            , MAX_BUYER_COUNT.toString()
         )).deployed();
 
     })
@@ -96,7 +94,7 @@ describe("RateOracle", function () {
                 , INIT_MATURITY_DATE.toString()
                 , INIT_EPOCH.toString()
                 , acc3.address
-                , [acc4.address, acc5.address]
+                , [acc4.address, acc5.address, acc6.address, acc7.address, acc8.address, acc9.address, acc10.address]
             )).wait();
 
             [swapContract, thirdPartySwapContract] = await controller.getSwapList();
@@ -144,7 +142,6 @@ describe("RateOracle", function () {
                     testComplementaryRatio = Math.floor(Math.random() * 10);
 
                 } while (testRatio * 10000/(testRatio + testComplementaryRatio) <= +maxFeeRate || testRatio === 0 || testComplementaryRatio === 0)
-                console.log({testRatio, testComplementaryRatio})
                 const setTx = oracleContract.setVoterFeeRatio(testRatio, testComplementaryRatio);
 
                 await expect(setTx).to.be.revertedWith("RateOracle: Fee rate specified too high");
@@ -208,7 +205,6 @@ describe("RateOracle", function () {
                     testComplementaryRatio = Math.floor(Math.random() * 10);
 
                 } while (testRatio * 10000/(testRatio + testComplementaryRatio) <= +maxFeeRate || testRatio === 0 || testComplementaryRatio === 0)
-                console.log({testRatio, testComplementaryRatio})
                 const setTx = oracleContract.setVoterFeeRatioOverride(testRatio, testComplementaryRatio, thirdPartySwapContract);
 
                 await expect(setTx).to.be.revertedWith("RateOracle: Fee rate specified too high");
@@ -260,7 +256,6 @@ describe("RateOracle", function () {
                     testComplementaryRatio = Math.floor(Math.random() * 10);
 
                 } while (testRatio * 10000/(testRatio + testComplementaryRatio) <= +maxFeeRate || testRatio === 0 || testComplementaryRatio === 0)
-                console.log({testRatio, testComplementaryRatio})
                 const setTx = oracleContract.setRecurringFeeRatio(testRatio, testComplementaryRatio);
 
                 await expect(setTx).to.be.revertedWith("RateOracle: Fee rate specified too high");
@@ -324,7 +319,6 @@ describe("RateOracle", function () {
                     testComplementaryRatio = Math.floor(Math.random() * 10);
 
                 } while (testRatio * 10000/(testRatio + testComplementaryRatio) <= +maxFeeRate || testRatio === 0 || testComplementaryRatio === 0)
-                console.log({testRatio, testComplementaryRatio})
                 const setTx = oracleContract.setRecurringFeeRatioOverride(testRatio, testComplementaryRatio, thirdPartySwapContract);
 
                 await expect(setTx).to.be.revertedWith("RateOracle: Fee rate specified too high");

@@ -77,8 +77,7 @@ contract Voting is AccessControl {
 
         address poolPaying = msg.sender;
         if(block.timestamp < lastVoterPaymentTimestamp[poolPaying] + (CXDefaultSwap(poolPaying).epochDays() * 86400)) revert("Can not pay at this time");
-        address[] memory votersToPay = poolVoters[poolPaying];
-        if (votersToPay.length == 0) votersToPay = voterList;
+        address[] memory votersToPay = getVoterList(poolPaying);
 
         uint256 totalAmountToPay = IOracle(oracleAddress).getRecurringFeeAmount(CXDefaultSwap(poolPaying).totalVoterFeeRemaining(), poolPaying);
         CXDefaultSwap(poolPaying).deductFromVoterReserve(totalAmountToPay/10000);
@@ -141,7 +140,7 @@ contract Voting is AccessControl {
     function withdrawVoterRewards(address _pool, uint256 _amountToWithdraw) external {
 
         uint256 totalAccumulated = voterPerPoolAccumulatedRewards[msg.sender][_pool];
-        require(totalAccumulated < _amountToWithdraw, "Not sufficient available to withdraw");
+        require(totalAccumulated >= _amountToWithdraw, "Not sufficient available to withdraw");
 
         totalAccumulated -= _amountToWithdraw;
         voterPerPoolAccumulatedRewards[msg.sender][_pool] = totalAccumulated;
@@ -386,7 +385,7 @@ contract Voting is AccessControl {
         emit AddVoter(_voter, _poolAddress, msg.sender);
     }
 
-    function getVoterList(address _poolAddress) external view returns (address[] memory) {
+    function getVoterList(address _poolAddress) public view returns (address[] memory) {
         if (poolHasSpecificVoters[_poolAddress]) return poolVoters[_poolAddress];
         return voterList;
     }
