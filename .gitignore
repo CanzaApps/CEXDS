@@ -10,8 +10,7 @@ cache
 artifacts
 
 
-scripts/newdep.js
-scripts/runs.js
+scripts/test.js
 
 deploy-configs/*/*
 deployments/*

@@ -33,6 +33,7 @@ describe("Voting", function() {
     let ownedPoolAddress;
     let thirdPartyPoolAddress;
     let poolToken;
+    let poolContract;
     let controller;
     let snapshotId;
     let contract;
@@ -41,7 +42,7 @@ describe("Voting", function() {
     this.beforeAll(async function() {
 
         [acc0, acc1, acc2, acc3, acc4, acc5, acc6, acc7, acc8, acc9, acc10, acc11, acc12, acc13, acc14, acc15, acc16, acc17, acc18] = await ethers.getSigners();
-        controller = await (await (await ethers.getContractFactory("SwapController")).deploy(acc1.address, maxSellerCount, maxBuyerCount)).deployed();
+        controller = await (await (await ethers.getContractFactory("SwapController")).deploy(acc1.address)).deployed();
         oracle = await (await (await ethers.getContractFactory("RateOracle")).deploy(controller.address
             , acc1.address
             , voterFeeRatio
@@ -170,10 +171,10 @@ describe("Voting", function() {
                     , poolToken.address
                     , (PREMIUM * 10000).toString()
                     , (MAKER_FEE * 10000).toString()
-                    , INIT_MATURITY_DATE.toString()
                     , INIT_EPOCH.toString()
+                    , true
                     , acc11.address
-                    , expectedThirdPartyVoters.slice(0, -1)
+                    , expectedThirdPartyVoters
                 )
         
                 await tx.wait();
@@ -186,7 +187,7 @@ describe("Voting", function() {
 
                 const votersOnThirdPartyPool = await contract.getVoterList(thirdPartyPoolAddress);
 
-                expect(votersOnThirdPartyPool.length).to.equal(expectedThirdPartyVoters.slice(0, -1).length);
+                expect(votersOnThirdPartyPool.length).to.equal(expectedThirdPartyVoters.length);
                 votersOnThirdPartyPool.forEach(async add => {
                     expect(await contract.hasRole(voterRole, add)).to.equal(false);
                     expect(expectedThirdPartyVoters.includes(add)).to.be.true;
@@ -214,13 +215,10 @@ describe("Voting", function() {
                 // First ensure voter list is full
                 if (voterCount < votersExpected)  {
                     const accsToAdd = expectedThirdPartyVoters.slice(voterCount);
-
                     const tx = await contract.setVotersForPool(accsToAdd, thirdPartyPoolAddress);
                     await tx.wait();
                 }
-
-                const expectedToFailTx = contract.connect(acc11).setVotersForPool(expectedThirdPartyVoters.slice(-1), thirdPartyPoolAddress);
-
+                const expectedToFailTx = contract.connect(acc11).setVotersForPool(expectedThirdPartyVoters, thirdPartyPoolAddress);
                 expect(expectedToFailTx).to.be.revertedWith("Voters added exceed allowable number of voters");
             })
         })
@@ -242,7 +240,6 @@ describe("Voting", function() {
                 const previousAcc9Role = await contract.hasRole(voterRole, acc9.address);
                 const previousAcc8Role = await contract.hasRole(voterRole, acc8.address);
                 const voterList = await contract.getVoterList(ownedPoolAddress);
-                console.log({previousAcc9Role, previousAcc8Role, voterList, acc9: acc9.address})
                 //acc9 already a voter. Replace with acc8
                 const tx = await contract.replaceVoter(acc9.address, acc8.address);
                 await tx.wait();
@@ -322,62 +319,82 @@ describe("Voting", function() {
         })
     })
 
-    describe("payRecurringVoterFees", function() {
+    describe("payRecurringVoterFee", function() {
         const startIndex = 0;
         let endIndex = 5;
         let previousVoterData = {};
         let swapPoolAmounts = {};
         let swaps;
+        let sample1;
+        let sample2;
+        let samplePoolSigner1;
+        let samplePoolSigner2;
+        let totalAmountToPay;
+        let voters;
         context("Happy Path", function () {
 
             before(async() => {
+                sample1 = await (await (await ethers.getContractFactory("Sample")).deploy()).deployed();
+                sample2 = await (await (await ethers.getContractFactory("Sample")).deploy()).deployed();
 
-                swaps = await controller.getSwapList();
-                if (swaps.length <= endIndex) endIndex = swaps.length - 1;
-                for (const swap of swaps.slice(startIndex, endIndex + 1)) {
-                    const voters = await contract.getVoterList(swap);
+                await (await sample1.deposit({value: ethers.utils.parseEther("1")})).wait();
+                await (await sample2.deposit({value: ethers.utils.parseEther("1")})).wait();
 
-                    const totalAmountToPay = ethers.utils.formatEther(await oracle.getRecurringFeeAmount(
-                        (await ethers.getContractAt("CEXDefaultSwap", swap)).totalVoterFeeRemaining(),
-                        swap
-                    ))
+                await hre.network.provider.request({
+                    method: "hardhat_impersonateAccount",
+                    params: [sample1.address],
+                });
 
-                    const amountPerVoter = +totalAmountToPay/voters.length;
-                    const swapAmounts = {
-                        total: ethers.utils.parseEther(totalAmountToPay).toString(),
-                        perVoter: ethers.utils.parseEther(amountPerVoter.toString()).toString()
-                    }
-                    swapPoolAmounts[swap] = swapAmounts;
+                await hre.network.provider.request({
+                    method: "hardhat_impersonateAccount",
+                    params: [sample2.address],
+                });
 
-                    for (const voter of voters) {
-                        if (!previousVoterData[voter]) 
-                        previousVoterData[voter] = {
-                            tokenBal: (await poolToken.balanceOf(voter)).toString(),
-                            pools: [swap]
-                        }
+                samplePoolSigner1 = await ethers.getSigner(sample1.address);
+                samplePoolSigner2 = await ethers.getSigner(sample1.address);
 
-                        else previousVoterData[voter].pools.push(swap)
-                    }
+                voters = await contract.getVoterList(sample1.address);
 
+                totalAmountToPay = ethers.utils.formatEther(await oracle.getRecurringFeeAmount(
+                    (await ethers.getContractAt("CXDefaultSwap", sample1.address)).totalVoterFeeRemaining(),
+                    sample1.address
+                ))
+
+                const amountPerVoter = +totalAmountToPay/voters.length;
+                const swapAmounts = {
+                    total: ethers.utils.parseEther(totalAmountToPay).toString(),
+                    perVoter: ethers.utils.parseEther(amountPerVoter.toString()).toString()
                 }
+                swapPoolAmounts[sample1.address] = swapAmounts;
+
+                for (const voter of voters) {
+                    if (!previousVoterData[voter]) 
+                    previousVoterData[voter] = {
+                        tokenBal: (await contract.voterPerPoolAccumulatedRewards(voter, sample1.address)).toString(),
+                        pools: [sample1.address]
+                    }
+
+                    else previousVoterData[voter].pools.push(sample1.address)
+                }
+        
             })
 
             it("Should emit PayVoters event", async () => {
 
-                const payTx = await contract.payRecurringVoterFees(startIndex.toString(), endIndex.toString());
+                const payTx = await contract.connect(samplePoolSigner1).payRecurringVoterFee();
 
                 await expect(payTx).to.emit(contract, "PayVoters").withArgs(
-                    swaps.slice(startIndex, endIndex + 1)
-                    , swaps.slice(startIndex, endIndex + 1).map(swap => swapPoolAmounts[swap].total)
-                    , startIndex.toString()
-                    , endIndex.toString()
+                    sample1.address
+                    , ethers.utils.parseEther(totalAmountToPay.toString())
+                    , voters
+                    , false
                 )
             })
 
-            it("Should transfer the amount of rewards to be paid to the voters and update their token balances", async () => {
+            it("Should transfer the amount of rewards to be paid to the voters and update their balances in storage", async () => {
 
                 for (const voter in previousVoterData) {
-                    voterBalanceAfterPay = (await poolToken.balanceOf(voter)).toString();
+                    voterBalanceAfterPay = (await contract.voterPerPoolAccumulatedRewards(voter, sample1.address)).toString();
 
                     const expectedTransfer = previousVoterData[voter].pools.reduce((acc, curr) => {
                         return +acc + (+swapPoolAmounts[curr].perVoter)
@@ -386,33 +403,6 @@ describe("Voting", function() {
                     expect(+voterBalanceAfterPay - (+previousVoterData[voter].tokenBal)).to.equal(expectedTransfer);
                 }
             })
-        })
-
-        context("Edge cases", function() {
-
-            it("Should revert if startIndex passed is higher or equal to endIndex", async () => {
-
-                const payTx = contract.payRecurringVoterFees(5, 5);
-                await expect(payTx).to.be.revertedWith("Index Misappropriation. Start must be before end");
-
-                const payTx2 = contract.payRecurringVoterFees(7, 4);
-                await expect(payTx2).to.be.revertedWith("Index Misappropriation. Start must be before end");
-
-            }) 
-
-            it("Should only be callable by the superAdmin", async () => {
-                const adminRole = await contract.SUPER_ADMIN();
-                const payTx = contract.connect(acc5).payRecurringVoterFees(0, 2);
-                await expect(payTx).to.be.revertedWith(
-                    `AccessControl: account ${acc5.address.toLowerCase()} is missing role ${adminRole}`
-                );
-
-                const payTx2 = contract.connect(acc7).payRecurringVoterFees(0, 2);
-                await expect(payTx2).to.be.revertedWith(
-                    `AccessControl: account ${acc7.address.toLowerCase()} is missing role ${adminRole}`
-                );
-
-            }) 
         })
     })
 
@@ -431,7 +421,7 @@ describe("Voting", function() {
                 poolAddress = await controller.swapList(0);
                 previousRecipientBalance = (await poolToken.balanceOf(recipient.address)).toString();
                 previousContractBalance = (await poolToken.balanceOf(contract.address)).toString();
-                previousReserveAmount = await (await ethers.getContractAt("CEXDefaultSwap", poolAddress)).totalVoterFeeRemaining();
+                previousReserveAmount = await (await ethers.getContractAt("CXDefaultSwap", poolAddress)).totalVoterFeeRemaining();
                 
             })
 
@@ -477,7 +467,6 @@ describe("Voting", function() {
 
     describe("vote", function() {
         let voterAccs;
-        let poolContract;
         let voterTokenBalances = [];
 
         before(async () => {
@@ -491,7 +480,7 @@ describe("Voting", function() {
             await poolToken.connect(acc9).approve(ownedPoolAddress, ethers.utils.parseEther('50'));
             await poolToken.connect(acc10).approve(ownedPoolAddress, ethers.utils.parseEther('50'));
 
-            poolContract = await ethers.getContractAt("CEXDefaultSwap", ownedPoolAddress);
+            poolContract = await ethers.getContractAt("CXDefaultSwap", ownedPoolAddress);
             await poolContract.connect(acc9).deposit(ethers.utils.parseEther('50'));
             await poolContract.connect(acc10).purchase(ethers.utils.parseEther('20'));
         })
@@ -513,15 +502,15 @@ describe("Voting", function() {
             }) 
 
             it("Should set voting state to true and pause pool contract upon second vote", async () => {
-                const poolContract = await ethers.getContractAt("CEXDefaultSwap", ownedPoolAddress)
-                const poolPreviouslyPaused = await poolContract.isPaused();
+                const poolContract = await ethers.getContractAt("CXDefaultSwap", ownedPoolAddress)
+                const poolPreviouslyPaused = await poolContract.paused();
                 const tx = await contract.connect(acc3).vote(ownedPoolAddress, true);
                 voterTokenBalances.push((await poolToken.balanceOf(acc3.address)).toString());
 
                 await tx.wait();
                 expect(await contract.votingState(ownedPoolAddress)).to.equal(true);
-                expect(await poolContract.isPaused()).to.be.true;
-                expect((await poolContract.isPaused()) && poolPreviouslyPaused).to.be.false;
+                expect(await poolContract.paused()).to.be.true;
+                expect((await poolContract.paused()) && poolPreviouslyPaused).to.be.false;
             })
 
             it("Should execute the final vote and pay all fees to the voters in rational majority and set defaulted if rational majority voted true", async () => {
@@ -532,15 +521,13 @@ describe("Voting", function() {
                 let voterChoices = [true, true]; //previous 2 truth votes
 
                 const voterList = await contract.getVoterList(ownedPoolAddress);
-                console.log({voterList})
 
                 for (const acc of voterAccs.slice(2)) {
-                    const k = (await poolToken.balanceOf(acc.address)).toString();
+                    const k = (await contract.voterPerPoolAccumulatedRewards(acc.address, poolContract.address)).toString();
                     voterTokenBalances.push(k);
                     
                     const choice = Math.round(Math.random());
                     voterChoices.push(choice ? true : false);
-                    console.log({acc: acc.address})
                     const tx = await contract.connect(acc).vote(ownedPoolAddress, choice ? true : false);
                     
                     await tx.wait();
@@ -553,7 +540,7 @@ describe("Voting", function() {
                 for (const acc of voterAccs) {
 
                     accIndex = voterAccs.indexOf(acc);
-                    tokenBalance = (await poolToken.balanceOf(acc.address)).toString();
+                    tokenBalance = (await contract.voterPerPoolAccumulatedRewards(acc.address, poolContract.address)).toString();
 
                     const checker = (trueCounts > votersExpected - trueCounts) === voterChoices[accIndex];
 
@@ -567,7 +554,6 @@ describe("Voting", function() {
                 // Confirm contract token balance
                 if (trueCounts > votersExpected/2) expect(await poolContract.defaulted()).to.be.true;
                 else expect(await poolContract.defaulted()).to.be.false;
-                expect(+prevContractTokenBalance - (+(await poolToken.balanceOf(contract.address)).toString())).to.equal(+voterFeePaid.toString())
                 
             })
 
@@ -587,7 +573,7 @@ describe("Voting", function() {
             it("Should allow a voter vote again if a next cycle is initiated on the pool", async () => {
                 const poolDefaulted = await poolContract.defaulted();
                 if (poolDefaulted) {
-                    let resetPoolTx = await controller.resetPoolAfterDefault(ownedPoolAddress, (Math.round(Date.now()/1000) + 86400).toString());
+                    let resetPoolTx = await controller.resetPoolAfterDefault(ownedPoolAddress);
 
                     await resetPoolTx.wait();
 
@@ -604,7 +590,7 @@ describe("Voting", function() {
                         await tx.wait();
                     }
 
-                    resetPoolTx = await controller.resetPoolAfterDefault(ownedPoolAddress, (Math.round(Date.now()/1000) + 86400).toString());
+                    resetPoolTx = await controller.resetPoolAfterDefault(ownedPoolAddress);
 
                     await resetPoolTx.wait();
 
@@ -629,7 +615,7 @@ describe("Voting", function() {
 
             it("Should not allow voting twice in same cycle", async () => {
                 // reset back to state after voter whitelist
-                await network.provider.send('evm_revert', [snapshotId]);
+                // await network.provider.send('evm_revert', [snapshotId]);
 
                 await poolToken.mint(acc9.address, ethers.utils.parseEther('100'));
                 await poolToken.mint(acc10.address, ethers.utils.parseEther('100'));
@@ -637,7 +623,7 @@ describe("Voting", function() {
                 await poolToken.connect(acc9).approve(ownedPoolAddress, ethers.utils.parseEther('50'));
                 await poolToken.connect(acc10).approve(ownedPoolAddress, ethers.utils.parseEther('50'));
 
-                const poolContract = await ethers.getContractAt("CEXDefaultSwap", ownedPoolAddress);
+                const poolContract = await ethers.getContractAt("CXDefaultSwap", ownedPoolAddress);
 
                 await poolContract.connect(acc9).deposit(ethers.utils.parseEther('20'));
                 await poolContract.connect(acc10).purchase(ethers.utils.parseEther('15'));
@@ -664,6 +650,54 @@ describe("Voting", function() {
         
     })
 
+    describe("withdrawVoterRewards", function() {
+        let controllerAddress;
+        let previousVoterTokenBalance;
+        let previousContractBalance;
+        let previousVoterRewardsBalance;
+        let amountToWithdraw;
+
+        before(async () => {
+            voterAccs = [acc2, acc3, acc4, acc5, acc6, acc7, acc9];
+
+            previousVoterTokenBalance = await poolToken.balanceOf(acc4.address);
+            previousContractBalance = await poolToken.balanceOf(contract.address);
+            previousVoterRewardsBalance = await contract.voterPerPoolAccumulatedRewards(acc4.address, poolContract.address);
+        })
+
+        context("Happy Path", function () {
+
+            it("Should emit WithdrawVoterRewards event", async () => {
+                amountToWithdraw = +ethers.utils.formatEther(previousVoterRewardsBalance) * 0.25;
+
+                const withdrawTx = contract.connect(acc4).withdrawVoterRewards(poolContract.address, ethers.utils.parseEther(amountToWithdraw.toString()));
+
+                await expect(withdrawTx).to.emit(contract, "WithdrawVoterRewards").withArgs(acc4.address, poolContract.address, ethers.utils.parseEther(amountToWithdraw.toString()))
+            })
+
+            it("Should decrease the voter rewards balance by withdrawn amount, and raise the voter's token balance", async () => {
+                const finalVoterTokenBalance = await poolToken.balanceOf(acc4.address);
+                const finalContractBalance = await poolToken.balanceOf(contract.address);
+                const finalVoterRewardsBalance = await contract.voterPerPoolAccumulatedRewards(acc4.address, poolContract.address);
+
+                expect((+ethers.utils.formatEther(previousVoterRewardsBalance) - (+ethers.utils.formatEther(finalVoterRewardsBalance))).toFixed(10)).to.equal(amountToWithdraw.toFixed(10));
+                expect((+ethers.utils.formatEther(previousContractBalance) - (+ethers.utils.formatEther(finalContractBalance))).toFixed(10)).to.equal(amountToWithdraw.toFixed(10));
+                expect((+ethers.utils.formatEther(finalVoterTokenBalance) - (+ethers.utils.formatEther(previousVoterTokenBalance))).toFixed(10)).to.equal(amountToWithdraw.toFixed(10));
+                // expect(+previousContractBalance.toString() - (+finalContractBalance.toString())).to.equal(+ethers.utils.parseEther(amountToWithdraw.toString()).toString());
+                // expect(+finalVoterTokenBalance.toString() - (+previousVoterTokenBalance.toString())).to.equal(+ethers.utils.parseEther(amountToWithdraw.toString()).toString());
+            })
+        })
+
+        context("Fail cases", function() {
+
+            it("Should revert if amount exceeds available voter rewards balance", async () => {
+                amountToWithdraw = +ethers.utils.formatEther(previousVoterRewardsBalance) * 1.5;
+                const withdrawTx = contract.withdrawVoterRewards(poolContract.address, ethers.utils.parseEther(amountToWithdraw.toString()));
+                await expect(withdrawTx).to.be.revertedWith("Not sufficient available to withdraw");
+            })
+        })
+    })
+
     describe("setControllerContract", function() {
         let controllerAddress;
 
@@ -671,7 +705,7 @@ describe("Voting", function() {
 
             it("Should emit SetController event", async () => {
 
-                controllerAddress = (await (await (await ethers.getContractFactory("SwapController")).deploy(acc1.address, maxSellerCount, maxBuyerCount)).deployed()).address;
+                controllerAddress = (await (await (await ethers.getContractFactory("SwapController")).deploy(acc1.address)).deployed()).address;
 
                 const setTx = await contract.setControllerContract(controllerAddress);
 
