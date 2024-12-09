@@ -9,48 +9,118 @@ const hre = require("hardhat");
 const fs = require("fs");
 
 async function getConfiguration(contract) {
-
   const networkName = hre.network.name;
 
-  const config = require(`../deploy-configs/${networkName}/${contract.toLowerCase()}.json`)
-  let allPools = []
+  const config = {
+    voterFeeRatio: 1,
+    voterFeeComplementaryRatio: 2,
+    maxSellerCount: 10,
+    maxBuyerCount: 10,
+    recurringFeeRatio: 1,
+    recurringFeeComplementaryRatio: 3,
+    votersRequired: 7,
+    recurringPaymentInterval: 604800,
+    secondSuperAdmin:"0x7F880bFDd349Df9d74ae7e93dd169a43D516777A",
+    universalVoters: [
+      "0x7F880bFDd349Df9d74ae7e93dd169a43D516777A",
+      "0x7F880bFDd349Df9d74ae7e93dd169a43D516777A",
+      "0x7F880bFDd349Df9d74ae7e93dd169a43D516777A",
+      "0x7F880bFDd349Df9d74ae7e93dd169a43D516777A",
+      "0x7F880bFDd349Df9d74ae7e93dd169a43D516777A",
+      "0x7F880bFDd349Df9d74ae7e93dd169a43D516777A",
+      "0x7F880bFDd349Df9d74ae7e93dd169a43D516777A",
+    ],
+    ownedSwaps: [
+      {
+        entityName: "Binance",
+        entityUrl: "https://binance.com",
+        tokenAddress: "0x791e2a9F7671A90A04465691eAE56CC9CF2FD92E",
+        premium: 0.01,
+        makerFee: 0.003,
+        initialMaturityTimestamp: "",
+        intialEpochDays: 7,
+      },
+      {
+        entityName: "Gate.io",
+        entityUrl: "https://gate.io",
+        tokenAddress: "0xA3057965dFd404096e1e307a3Cf0f40e0250730D",
+        premium: 0.01,
+        makerFee: 0.003,
+        initialMaturityTimestamp: "",
+        intialEpochDays: 7,
+      },
+    ],
+
+    thirdPartySwaps: [
+      {
+        entityName: "Gate.io",
+        entityUrl: "https://gate.io",
+        tokenAddress: "0x791e2a9F7671A90A04465691eAE56CC9CF2FD92E",
+        premium: 0.01,
+        makerFee: 0.003,
+        initialMaturityTimestamp: "",
+        intialEpochDays: 7,
+        owner: "0x41f200Fa5Cb56082D7515637A3649Ecf07784F6D",
+        voters: [
+          "0x42d28494FA5735f53AFd233358C4E494A13007b4",
+          "0xec9af0A93b9664d5eC97F1271b11e8A3868E7FEC",
+          "0x82fCE39f1f2EF722D5128DfB0b8139735C7C24aC",
+        ],
+      },
+    ],
+  };
+
+  let allPools = [];
   if (contract === "cexdefaultswap") {
-    const ownedSwapConfigs = config.ownedSwaps
+    const ownedSwapConfigs = config.ownedSwaps;
     for (const conf of ownedSwapConfigs) {
+      if (!conf.entityName || !conf.entityUrl || !conf.initialEpochDays)
+        throw new Error("Requires fields in configs to be set");
 
-      if (!conf.entityName || !conf.entityUrl || !conf.initialEpochDays) 
-      throw new Error("Requires fields in configs to be set");
-
-      conf.initialMaturityTimestamp = conf.initialMaturityTimestamp || Math.round(Date.now()/1000) + 604800;
+      conf.initialMaturityTimestamp =
+        conf.initialMaturityTimestamp || Math.round(Date.now() / 1000) + 604800;
 
       if (!conf.tokenAddress) {
-        conf.tokenAddress = (await (await (await ethers.getContractFactory("ERC20Mock")).deploy()).deployed()).address;
+        conf.tokenAddress = (
+          await (
+            await (await ethers.getContractFactory("ERC20Mock")).deploy()
+          ).deployed()
+        ).address;
       }
 
       conf.isThirdParty = false;
     }
-    
+
     const thirdPartySwapConfigs = config.thirdPartySwaps;
     for (const conf of thirdPartySwapConfigs) {
+      if (
+        !conf.entityName ||
+        !conf.entityUrl ||
+        !conf.initialEpochDays ||
+        !conf.owner
+      )
+        throw new Error("Requires fields in configs to be set");
 
-      if (!conf.entityName || !conf.entityUrl || !conf.initialEpochDays || !conf.owner) 
-      throw new Error("Requires fields in configs to be set");
-
-      conf.initialMaturityTimestamp = conf.initialMaturityTimestamp || Math.round(Date.now()/1000) + 604800;
+      conf.initialMaturityTimestamp =
+        conf.initialMaturityTimestamp || Math.round(Date.now() / 1000) + 604800;
 
       if (!conf.tokenAddress) {
-        conf.tokenAddress = (await (await (await ethers.getContractFactory("ERC20Mock")).deploy()).deployed()).address;
+        conf.tokenAddress = (
+          await (
+            await (await ethers.getContractFactory("ERC20Mock")).deploy()
+          ).deployed()
+        ).address;
       }
 
       conf.isThirdParty = true;
-
     }
 
     allPools = [...allPools, ...ownedSwapConfigs, ...thirdPartySwapConfigs];
     return allPools;
   }
 
-  if (!config.secondSuperAdmin) throw new Error("Requires secondSuperAdmin to be set in configs")
+  if (!config.secondSuperAdmin)
+    throw new Error("Requires secondSuperAdmin to be set in configs");
 
   if (contract === "controller") {
     config.maxSellerCount = config.maxSellerCount || 10;
@@ -58,36 +128,59 @@ async function getConfiguration(contract) {
   }
 
   if (contract === "voting") {
-    if(config.universalVoters.length < 7) throw new Error("Requires voter address to be set in configs")
+    if (config.universalVoters.length < 7)
+      throw new Error("Requires voter address to be set in configs");
   }
 
   if (contract === "oracle") {
     config.voterFeeRatio = config.voterFeeRatio || 1;
     config.voterFeeComplementaryRatio = config.voterFeeComplementaryRatio || 2;
     config.recurringFeeRatio = config.recurringFeeRatio || 1;
-    config.recurringFeeComplementaryRatio = config.recurringFeeComplementaryRatio || 3;
+    config.recurringFeeComplementaryRatio =
+      config.recurringFeeComplementaryRatio || 3;
     config.votersRequired = config.votersRequired || 7;
     config.recurringPaymentInterval = config.recurringPaymentInterval || 604800;
-
   }
 
   return config;
-
-
 }
 
 async function main() {
-
-  const [acc0, acc1, acc2, acc3, acc4, acc5, acc6, acc7, acc8, acc9, acc10] = await hre.ethers.getSigners();
-  let signers = [acc0, acc1, acc2, acc3, acc4, acc5, acc6, acc7, acc8, acc9, acc10];
+  const [
+    acc0,
+    acc1,
+    acc2,
+    acc3,
+    acc4,
+    acc5,
+    acc6,
+    acc7,
+    acc8,
+    acc9,
+    acc10,
+  ] = await hre.ethers.getSigners();
+  let signers = [
+    acc0,
+    acc1,
+    acc2,
+    acc3,
+    acc4,
+    acc5,
+    acc6,
+    acc7,
+    acc8,
+    acc9,
+    acc10,
+  ];
   // const secondAdmin = "0x1d80b14fc72d953eDfD87bF4d6Acd08547E3f1F6";
 
   const controllerConfig = await getConfiguration("controller");
 
   const CEXDeployer = await hre.ethers.getContractFactory("SwapController");
-  const cexDeployer = await CEXDeployer.deploy(controllerConfig.secondSuperAdmin
-    , controllerConfig.maxSellerCount
-    , controllerConfig.maxBuyerCount
+  const cexDeployer = await CEXDeployer.deploy(
+    controllerConfig.secondSuperAdmin,
+    controllerConfig.maxSellerCount,
+    controllerConfig.maxBuyerCount
   );
 
   await cexDeployer.deployed();
@@ -97,14 +190,15 @@ async function main() {
   const oracleConfig = await getConfiguration("oracle");
 
   const Oracle = await hre.ethers.getContractFactory("RateOracle");
-  const oracle = await Oracle.deploy(cexDeployer.address
-    , oracleConfig.secondSuperAdmin
-    , oracleConfig.voterFeeRatio
-    , oracleConfig.voterFeeComplementaryRatio
-    , oracleConfig.recurringFeeRatio
-    , oracleConfig.recurringFeeComplementaryRatio
-    , oracleConfig.votersRequired
-    , oracleConfig.recurringPaymentInterval.toString()
+  const oracle = await Oracle.deploy(
+    cexDeployer.address,
+    oracleConfig.secondSuperAdmin,
+    oracleConfig.voterFeeRatio,
+    oracleConfig.voterFeeComplementaryRatio,
+    oracleConfig.recurringFeeRatio,
+    oracleConfig.recurringFeeComplementaryRatio,
+    oracleConfig.votersRequired,
+    oracleConfig.recurringPaymentInterval.toString()
   );
 
   await oracle.deployed();
@@ -113,12 +207,18 @@ async function main() {
   const votingConfig = await getConfiguration("voting");
 
   const Voting = await hre.ethers.getContractFactory("Voting");
-  const voting = await Voting.deploy(votingConfig.secondSuperAdmin, cexDeployer.address, oracle.address);
+  const voting = await Voting.deploy(
+    votingConfig.secondSuperAdmin,
+    cexDeployer.address,
+    oracle.address
+  );
 
   await voting.deployed();
   console.log("Voting deployed to ", voting.address);
 
-  const whitelistTx = await voting.whiteListVoters(votingConfig.universalVoters);
+  const whitelistTx = await voting.whiteListVoters(
+    votingConfig.universalVoters
+  );
   await whitelistTx.wait();
 
   // Add Voting Contract to controller
@@ -134,27 +234,27 @@ async function main() {
 
   for (const swap of swapsToCreate) {
     let txSwap;
-    if(!swap.isThirdParty) {
-      txSwap = await cexDeployer.createSwapContract(swap.entityName
-        , swap.entityUrl
-        , swap.tokenAddress
-        , (swap.premium * 10000).toString()
-        , (swap.makerFee * 10000).toString()
-        , swap.initialMaturityTimestamp.toString()
-        , swap.initialEpochDays.toString()
+    if (!swap.isThirdParty) {
+      txSwap = await cexDeployer.createSwapContract(
+        swap.entityName,
+        swap.entityUrl,
+        swap.tokenAddress,
+        (swap.premium * 10000).toString(),
+        (swap.makerFee * 10000).toString(),
+        swap.initialMaturityTimestamp.toString(),
+        swap.initialEpochDays.toString()
       );
-    }
-
-    else {
-      txSwap = await cexDeployer.createSwapContract(swap.entityName
-        , swap.entityUrl
-        , swap.tokenAddress
-        , (swap.premium * 10000).toString()
-        , (swap.makerFee * 10000).toString()
-        , swap.initialMaturityTimestamp.toString()
-        , swap.initialEpochDays.toString()
-        , swap.owner
-        , swap.voters
+    } else {
+      txSwap = await cexDeployer.createSwapContract(
+        swap.entityName,
+        swap.entityUrl,
+        swap.tokenAddress,
+        (swap.premium * 10000).toString(),
+        (swap.makerFee * 10000).toString(),
+        swap.initialMaturityTimestamp.toString(),
+        swap.initialEpochDays.toString(),
+        swap.owner,
+        swap.voters
       );
     }
 
@@ -167,11 +267,13 @@ async function main() {
     controller: cexDeployer.address,
     voting: voting.address,
     oracle: oracle.address,
-    swapsCreated: swaps
-  }
+    swapsCreated: swaps,
+  };
 
-  fs.writeFileSync(`../deployments/${hre.network.name}.json`, JSON.stringify(deployments))
-
+  fs.writeFileSync(
+    `../deployments/${hre.network.name}.json`,
+    JSON.stringify(deployments)
+  );
 }
 
 // We recommend this pattern to be able to use async/await everywhere
