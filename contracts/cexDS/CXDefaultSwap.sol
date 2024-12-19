@@ -137,8 +137,8 @@ contract CXDefaultSwap {
         address _oracle,
         bool _isVoterDefaulting
     ) {
-        require(_votingContract.isContract() && _oracle.isContract() && _currency.isContract(), 
-        "Address supplied for Voting, Currency, or Oracle, contract is invalid");
+        // require(_votingContract.isContract() && _oracle.isContract() && _currency.isContract(), 
+        // "Address supplied for Voting, Currency, or Oracle, contract is invalid");
         require(_premium < basisPoints && _makerFee < basisPoints, "Premium, and maker fee, can not be 100% or above");
         currency = IERC20(_currency);
         entityName = _entityName;

@@ -140,7 +140,7 @@ contract CEXDefaultSwap {
         address _votingContract,
         address _oracle
     ) {
-        require(_votingContract.isContract() && _oracle.isContract(), "Address supplied for Voting, or Oracle, contract is invalid");
+        // require(_votingContract.isContract() && _oracle.isContract(), "Address supplied for Voting, or Oracle, contract is invalid");
         require(_initialMaturityDate > block.timestamp, "Invalid Maturity Date set");
         require(_premium < 10000 && _makerFee < 10000, "Premium, and maker fee, can not be 100% or above");
         currency = IERC20(_currency);
